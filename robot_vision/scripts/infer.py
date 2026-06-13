@@ -23,18 +23,18 @@ YOLO_CLASSES = [
     "senegalia", "tamarix", "themeda",
 ]
 
-# ── DATA FIX: merge baobab → adansonia (same plant) ─────────
-# Baobab is the common name for Adansonia. The dataset had both.
+# ── DATA FIX: merge duplicate classes ────────────────────────
+# The dataset has botanical/common name duplicates that we resolve here:
+#   1. "baobab" and "adansonia" are the same plant (Baobab tree / Adansonia genus).
+#   2. "senegalia" and "vachellia" are both grouped under "acacia" for fuel modeling.
 CLASS_FIX = {
     "baobab": "adansonia",
+    "senegalia": "acacia",
+    "vachellia": "acacia",
 }
 
-# Vachellia doesn't exist as a YOLO class.
-# Taxonomically, African "acacia" = Vachellia.
-# If we see "vachellia" in ground truth, we count it as correct
-# if YOLO predicts "acacia" or "senegalia" (close relatives).
-# At inference time, this isn't needed — but we document the gap.
-VACHELLIA_MAP = "acacia"  # closest YOLO class
+# Closest YOLO class fallback map for evaluation purposes
+VACHELLIA_MAP = "acacia"
 
 # ── Load models once ────────────────────────────────────────
 PROJECT = Path(__file__).resolve().parents[1]

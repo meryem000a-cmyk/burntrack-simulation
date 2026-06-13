@@ -103,6 +103,14 @@ def vision_inference_process(input_queue, output_queue, model_path, class_names)
                     else:
                         continue
                     
+                    # Merge duplicate classes (e.g. baobab -> adansonia, senegalia/vachellia -> acacia)
+                    CLASS_FIX = {
+                        "baobab": "adansonia",
+                        "senegalia": "acacia",
+                        "vachellia": "acacia",
+                    }
+                    species = CLASS_FIX.get(species, species)
+                    
                     if species not in frame_counts:
                         frame_counts[species] = [0, 0]
                         

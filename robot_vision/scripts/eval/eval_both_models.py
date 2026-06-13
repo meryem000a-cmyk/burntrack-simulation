@@ -98,6 +98,12 @@ def main():
     for path, cls_name in tqdm(samples, desc="Evaluating"):
         species_true = extract_species(cls_name)
         dryness_true = extract_dryness(cls_name)
+        CLASS_FIX = {
+            "baobab": "adansonia",
+            "senegalia": "acacia",
+            "vachellia": "acacia",
+        }
+        species_true = CLASS_FIX.get(species_true, species_true)
 
         img = Image.open(path).convert("RGB")
 
@@ -109,8 +115,10 @@ def main():
             cnn_correct += 1
 
         yolo_results = yolo(img)
+        pred_species = None
         if yolo_results and yolo_results[0].probs is not None:
             pred_species = yolo_results[0].names[yolo_results[0].probs.top1]
+            pred_species = CLASS_FIX.get(pred_species, pred_species)
             if pred_species == species_true:
                 yolo_correct += 1
 
