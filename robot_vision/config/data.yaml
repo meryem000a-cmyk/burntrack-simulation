@@ -1,0 +1,40 @@
+path: /home/anwar/Documents/Vision/datasets/yolo_flora
+train: images/train
+val: images/val
+
+# Classes combining Species + Dryness (Rothermel Curing State)
+names:
+  0: adansonia_not_dry
+  1: adansonia_dry
+  2: acacia_not_dry
+  3: acacia_dry
+  4: vachellia_not_dry
+  5: vachellia_dry
+  6: senegalia_not_dry
+  7: senegalia_dry
+  8: combretum_not_dry
+  9: combretum_dry
+  10: brachystegia_not_dry
+  11: brachystegia_dry
+  12: colophospermum_not_dry
+  13: colophospermum_dry
+  14: ficus_not_dry
+  15: ficus_dry
+  16: khaya_not_dry
+  17: khaya_dry
+  18: macaranga_not_dry
+  19: macaranga_dry
+  20: euphorbia_not_dry
+  21: euphorbia_dry
+  22: aloe_not_dry
+  23: aloe_dry
+  24: protea_not_dry
+  25: protea_dry
+  26: erica_not_dry
+  27: erica_dry
+  28: themeda_not_dry
+  29: themeda_dry
+  30: andropogon_not_dry
+  31: andropogon_dry
+  32: tamarix_not_dry
+  33: tamarix_dry

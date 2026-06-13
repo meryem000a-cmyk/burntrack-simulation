@@ -1,0 +1,41 @@
+path: /home/anwar/Documents/Vision/datasets/yolo_flora
+train: images/train
+val: images/val
+
+names:
+  0: acacia_not_dry
+  1: acacia_dry
+  2: adansonia_not_dry
+  3: adansonia_dry
+  4: aloe_not_dry
+  5: aloe_dry
+  6: andropogon_not_dry
+  7: andropogon_dry
+  8: baobab_not_dry
+  9: baobab_dry
+  10: brachystegia_not_dry
+  11: brachystegia_dry
+  12: colophospermum_not_dry
+  13: colophospermum_dry
+  14: combretum_not_dry
+  15: combretum_dry
+  16: erica_not_dry
+  17: erica_dry
+  18: euphorbia_not_dry
+  19: euphorbia_dry
+  20: ficus_not_dry
+  21: ficus_dry
+  22: khaya_not_dry
+  23: khaya_dry
+  24: macaranga_not_dry
+  25: macaranga_dry
+  26: protea_not_dry
+  27: protea_dry
+  28: senegalia_not_dry
+  29: senegalia_dry
+  30: tamarix_not_dry
+  31: tamarix_dry
+  32: themeda_not_dry
+  33: themeda_dry
+  34: vachellia_not_dry
+  35: vachellia_dry
