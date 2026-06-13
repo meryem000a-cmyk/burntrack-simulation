@@ -283,8 +283,9 @@ class Trainer:
         )
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=10, verbose=True
+    optimizer, mode='min', factor=0.5, patience=10 
         )
+
 
         # Entraînement
         best_val_loss = float('inf')

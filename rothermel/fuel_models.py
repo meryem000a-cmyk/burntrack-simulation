@@ -239,7 +239,7 @@ AFRICA_NORTH: Dict[str, FuelModel] = {
         code="AF_STEPPE", name="Steppe marocaine (Artemisia, Stipa)",
         w_1h=0.25, w_10h=0.05, w_100h=0, w_live_herb=0.10, w_live_woody=0.02,
         delta=0.25, sigma_1h=12000, sigma_live_herb=12000, sigma_live_woody=3500,
-        h_dead=18600, h_live=19000, mx=12,
+        h_dead=18600, h_live=19000, mx=20,
         is_dynamic=True, region="north_africa",
         description="Steppe à Artemisia herba-alba, Stipa tenacissima. Climat aride."
     ),
@@ -287,7 +287,7 @@ AFRICA_NORTH: Dict[str, FuelModel] = {
         code="AF_CEREALES", name="Plaine céréalière (résidus de récolte)",
         w_1h=1.50, w_10h=0, w_100h=0, w_live_herb=0, w_live_woody=0,
         delta=0.10, sigma_1h=15000, sigma_live_herb=15000, sigma_live_woody=7874,
-        h_dead=17000, h_live=17000, mx=12,
+        h_dead=17000, h_live=17000, mx=18,
         is_dynamic=False, region="north_africa",
         description="Résidus de céréales après récolte. Haouz, Tadla."
     ),
@@ -327,7 +327,7 @@ AFRICA_SAVANNA: Dict[str, FuelModel] = {
         code="AF_SAHEL_GRASS", name="Savane sahélienne herbeuse",
         w_1h=0.15, w_10h=0, w_100h=0, w_live_herb=0.20, w_live_woody=0,
         delta=0.30, sigma_1h=15000, sigma_live_herb=15000, sigma_live_woody=7874,
-        h_dead=18600, h_live=18600, mx=12,
+        h_dead=18600, h_live=18600, mx=20,
         is_dynamic=True, region="sahel",
         description="Savane sahélienne purement herbeuse. Andropogon, Loudetia."
     ),
@@ -335,7 +335,7 @@ AFRICA_SAVANNA: Dict[str, FuelModel] = {
         code="AF_SAHEL_WOODED", name="Savane sahélienne arborée (Acacia)",
         w_1h=0.20, w_10h=0.05, w_100h=0, w_live_herb=0.25, w_live_woody=0.08,
         delta=0.40, sigma_1h=12000, sigma_live_herb=12000, sigma_live_woody=3500,
-        h_dead=18600, h_live=19000, mx=15,
+        h_dead=18600, h_live=19000, mx=22,
         is_dynamic=True, region="sahel",
         description="Savane sahélienne arborée. Acacia senegal, A. tortilis."
     ),
@@ -343,7 +343,7 @@ AFRICA_SAVANNA: Dict[str, FuelModel] = {
         code="AF_SUDAN_GRASS", name="Savane soudanienne herbeuse",
         w_1h=0.30, w_10h=0.05, w_100h=0, w_live_herb=0.40, w_live_woody=0,
         delta=0.60, sigma_1h=12000, sigma_live_herb=12000, sigma_live_woody=7874,
-        h_dead=18600, h_live=18600, mx=15,
+        h_dead=18600, h_live=18600, mx=20,
         is_dynamic=True, region="sudan",
         description="Savane soudanienne herbeuse. Hyparrhenia, Andropogon."
     ),
@@ -351,7 +351,7 @@ AFRICA_SAVANNA: Dict[str, FuelModel] = {
         code="AF_SUDAN_WOODED", name="Savane soudanienne boisée",
         w_1h=0.35, w_10h=0.12, w_100h=0.05, w_live_herb=0.30, w_live_woody=0.25,
         delta=0.70, sigma_1h=10000, sigma_live_herb=10000, sigma_live_woody=3500,
-        h_dead=18600, h_live=19500, mx=18,
+        h_dead=18600, h_live=19500, mx=22,
         is_dynamic=True, region="sudan",
         description="Savane soudanienne boisée. Combretum, Terminalia."
     ),
@@ -455,7 +455,7 @@ AFRICA_SAVANNA: Dict[str, FuelModel] = {
         code="AF_RANGE_DEGRADED", name="Pâturage dégradé (surpâturage)",
         w_1h=0.05, w_10h=0, w_100h=0, w_live_herb=0.03, w_live_woody=0.01,
         delta=0.10, sigma_1h=15000, sigma_live_herb=15000, sigma_live_woody=7874,
-        h_dead=18600, h_live=18600, mx=10,
+        h_dead=18600, h_live=18600, mx=15,
         is_dynamic=True, region="general",
         description="Pâturage surexploité. Très peu de combustible."
     ),
@@ -463,7 +463,7 @@ AFRICA_SAVANNA: Dict[str, FuelModel] = {
         code="AF_RANGE_INTACT", name="Pâturage intact (Afrique de l'Est)",
         w_1h=0.30, w_10h=0.05, w_100h=0, w_live_herb=0.35, w_live_woody=0.03,
         delta=0.70, sigma_1h=12000, sigma_live_herb=12000, sigma_live_woody=7874,
-        h_dead=18600, h_live=18600, mx=18,
+        h_dead=18600, h_live=18600, mx=20,
         is_dynamic=True, region="east_africa",
         description="Pâturage intact. Herbes hautes, charge élevée."
     ),
