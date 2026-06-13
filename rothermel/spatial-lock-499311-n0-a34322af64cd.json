@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "spatial-lock-499311-n0",
+  "private_key_id": "a34322af64cdf187cb18628a8ffeca28bb8dac9b",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDWCN9AyRV3p5FA\nzxyoeCmEizWCrhAfj6bXWbwIJn3GXYkm6FtxDl89R1sN4sm0BtAjyvqLbiVQSQPL\n1APMxzlwSc3/DEPDaMuNcWPLEE57Wf4HyOD0ljYpUxtrnXYXD2yzLGC0vLghbV2+\namoHzWWuii1QgsV3CE+U/ZNg7jhG+BGJL8O7mBYeA42aDBM+XinvdunOCZo8o88B\nYga/7pLOfy5xWHBmEPDdutdbGFFkfcxGpyti3f+8UCk+Amyayn1PnrN1oj/+v3Q9\nmnaKJzYEiJ9qLClovNkr0POl5e8GvyLhPDwjkCCD9iuJVfCPivmF8WB71LXPh2Hh\nnaabU8X5AgMBAAECggEAKBD+m+3YlS7a39c1jer6mKuHn5guf/3/9UHA04TDGDpj\nxZMLJRmT5hCAwNNyvz7kQUMKzkWW+hXE/mfIs1GbFMRYKdW1rLOmISr4C6gYjPpO\ndc4aoGarKma6lBVkqRHz3wGgc8z9KhLDUPUyNpYyYe9PZsooJW16mlEywNsvUUdg\nqcNh2wFwW2NVhqBoSTAgJKH966natfryGwZgVK32X3zjYSWFBBiJCd/btJM5rTkk\nKqhh9aF/NZJ3fIiYHSpmhnAfGf+SHDx9qJYpCz5GnrvdaUpood7Dygpii+Fzu/6a\n50YudjOW8qnCsYVnWOtqru2Mmrq6PHK1JqzJS+/eZQKBgQDzlh7JeR44MjFPnLRr\nOQ8Imgv9M3LubdL4xks5f6aT8OBoYssaSjQE9Y0gplzOusiJn3lyoOMcvCARrAvU\nxz0sSC8BrDWA/ADpUhZE21qDDaIc0V+7nsExctvCW1fKGg51xVpGZsm9R/2Z/tSS\nTrn1uzWo8w/fsYT5jOlg/kGqdQKBgQDg8Tajyil1kc7aYzyasKYaBQfLiCbz2AEd\no0sbit0enEfUUudU8BlOs/oeYmoCc+VsZBcwMbfC5pyhP/G/tpP8Fq6EwkI2Q4H7\n5Za4nCn+FGwSHFovMWgXfVEOoDVlILmb/tGMZLiMvl5xjoJ/a2fL80B7UoIS1LiN\naewAsjCU9QKBgQDUf9Ep6Dyhv7/e+RE4PRXNZj4xTLHmKO8U0kCLz72tcEUFK7KN\no9BPxzuwERID01ThIrubcZnP1pqPcCz+GjZWrD490lL2zGGrKk59EXObwsf7JfjD\nP9LAZbgrjO5ARIz61wlTQ5aZRvWJY5Nkc8OtCP3d/vWJK1+bKP/r+sOkhQKBgQDD\nP90Dstjl2lhIq9bRFwA2maM4gcf95MKjLThmgdSJW3Hl1MhDq9zrucEjWp1V36+G\ntCKEjMNLA811EgIPPLWbHT0Cs3OxkktjkNeRCsxQZP2hgsatLB+ENByFq35td0hl\nJXxSdqLSV/O2cdLIMzx3hX+1C9sn6UkARq65s/IDeQKBgQCM8kFAu5BAdszz2ym8\nzkRK14LvDcJTIolJbNaOA4i/CSpsVioG59OXsttyobBazM9BlYpu1g0QCABOtDoY\nCH9V4LQhcN3SJVNwLrrtV+vdNYPzCU8zbZ20EcXERP/pwNY3oidR84kegIw5BcrO\n8jfdJGR2ieIRuZHj64QTeXWDTw==\n-----END PRIVATE KEY-----\n",
+  "client_email": "burntrack-service@spatial-lock-499311-n0.iam.gserviceaccount.com",
+  "client_id": "114521897824077680228",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/burntrack-service%40spatial-lock-499311-n0.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
