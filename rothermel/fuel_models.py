@@ -66,7 +66,6 @@ class FuelModel:
         return f"FuelModel({self.code}: {self.name}, w_total={self.w_total:.3f} kg/m²)"
 
 
-# =============================================================================
 # MODÈLES STANDARD BEHAVE (convertis en SI depuis lb/ft², ft, BTU/lb)
 # CORRECTION v2 : Loadings ×10 (erreur conversion originale)
 # =============================================================================
@@ -273,7 +272,6 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
 }
 
 
-# =============================================================================
 # MODÈLES AFRIQUE DU NORD / MAROC
 # CORRECTION v2 : Ajout sigma_10h/sigma_100h manquants
 # =============================================================================
