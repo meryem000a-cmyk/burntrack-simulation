@@ -1,0 +1,9 @@
+path: /home/anwar/Documents/Vision/datasets/quick_demo
+train: images/train
+val: images/test
+
+names:
+  0: acacia_not_dry
+  1: acacia_dry
+  2: baobab_not_dry
+  3: baobab_dry

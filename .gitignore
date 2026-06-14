@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Robot Vision Project specific ignores
+robot_vision/datasets/
+robot_vision/.cache/
+robot_vision/.venv/
+robot_vision/runs/
+robot_vision/yolos/
+robot_vision/eval_images/
+*.npy
+*.pt
+
