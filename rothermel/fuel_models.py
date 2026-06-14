@@ -46,9 +46,7 @@ class FuelModel:
         return f"FuelModel({self.code}: {self.name}, w_total={self.w_total:.3f} kg/m²)"
 
 
-# =============================================================================
 # MODÈLES STANDARD BEHAVE (convertis en SI depuis lb/ft², ft, BTU/lb)
-# =============================================================================
 
 BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GR1": FuelModel(
@@ -230,9 +228,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
 }
 
 
-# =============================================================================
 # MODÈLES AFRIQUE DU NORD / MAROC
-# =============================================================================
+
 
 AFRICA_NORTH: Dict[str, FuelModel] = {
     "AF_STEPPE": FuelModel(
