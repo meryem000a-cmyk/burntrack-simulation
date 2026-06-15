@@ -1,1 +1,0 @@
-j'avais un R² de 0.038 avec un MAE de 3.047 et le problème des biais synthétiques circulaires (sans MC Dropout), et je les ai résolus avec un vrai dataset basé sur la physique et une architecture d'ensemble empilée en utilisant PyTorch, XGBoost, LightGBM et CatBoost
