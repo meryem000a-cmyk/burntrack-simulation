@@ -389,19 +389,24 @@ class RobotNavigator:
     """
     Interface haut niveau : robot autonome naviguant dans la simulation de feu.
 
-    Appeler .step(grid, rules, sim.current_time) a chaque pas de simulation.
-    Le robot se deplace d une cellule par appel (vitesse = cell_size / dt m/min).
-    Pour un rover lent, appeler .step() toutes les N etapes de simulation.
+    Deux modes de navigation :
+      - Point-to-point : un seul goal fixe (comme avant).
+      - Multi-waypoint  : liste ordonnee de waypoints (WaypointPlanner).
+                          Le robot enchaine les D* Lite de WP en WP,
+                          saute les WP bloques par le feu, met a jour
+                          la couverture apres chaque visite.
+
+    Appeler .step() a chaque pas de simulation (ou tous les N pas pour
+    un rover lent). Le robot se deplace d une cellule par appel.
 
     Args:
         position          : Position initiale (row, col)
-        goal              : Objectif a atteindre (row, col)
-        safety_margin_min : Marge de securite (min). Cellules dont le feu
-                            arrive dans < N min sont evitees.
-        replan_every      : Frequence de re-planification (en appels a .step()).
+        goal              : Objectif simple (row, col) -- ignore si waypoints fourni
+        safety_margin_min : Marge de securite (min)
+        replan_every      : Frequence de re-planification (appels a .step())
     """
 
-    def __init__(self, position: Pos, goal: Pos,
+    def __init__(self, position: Pos, goal: Optional[Pos] = None,
                  safety_margin_min: float = 10.0,
                  replan_every: int = 5):
         self.position       = position
@@ -411,32 +416,77 @@ class RobotNavigator:
         self.path_history: List[Pos] = [position]
         self.status: str             = "navigating"
         self._planner: Optional[DStarLite] = None
-        self._risk_map = RiskMap()
-        self._steps    = 0
+        self._risk_map     = RiskMap()
+        self._steps        = 0
+        # Multi-waypoint
+        self._wp_planner   = None   # WaypointPlanner (optionnel)
+        self._current_wp   = None   # Waypoint courant cible
+        self.waypoints_log: List[str] = []  # historique des WP visites
+
+    # ------------------------------------------------------------------
+    # Configuration multi-waypoint
+    # ------------------------------------------------------------------
+
+    def set_waypoints(self, wp_planner) -> None:
+        """
+        Active le mode multi-waypoint.
+
+        Args:
+            wp_planner : WaypointPlanner deja ordonne (apres greedy_tour()).
+                         Le robot visitera les waypoints dans cet ordre,
+                         en sautant ceux bloques par le feu.
+        """
+        self._wp_planner = wp_planner
+        self._advance_to_next_waypoint()
+
+    def _advance_to_next_waypoint(self) -> bool:
+        """
+        Pointe vers le prochain waypoint accessible.
+        Retourne True si un WP disponible, False si mission terminee.
+        """
+        if self._wp_planner is None:
+            return False
+        nxt = self._wp_planner.next_unvisited()
+        if nxt is None:
+            self.status = "mission_complete"
+            return False
+        self._current_wp = nxt
+        self.goal        = nxt.position
+        self._planner    = None   # force reinit D* Lite vers nouveau goal
+        return True
+
+    # ------------------------------------------------------------------
+    # Pas de navigation
+    # ------------------------------------------------------------------
 
     def step(self, grid: Grid, rules: PropagationRules,
              current_time: float) -> str:
         """
         Avance le robot d une cellule.
 
-        Etapes :
-          1. Initialisation D* Lite au premier appel.
-          2. Re-planification si periodicite atteinte ou danger immediat.
-          3. Recuperation du prochain mouvement et deplacement.
+        En mode multi-waypoint :
+          - Filtre les WP inaccessibles a chaque replanification.
+          - Passe automatiquement au WP suivant quand le courant est atteint.
+          - Retourne "mission_complete" quand tous les WP sont visites ou bloques.
 
         Returns:
-            "navigating" | "reached" | "trapped"
+            "navigating" | "reached" | "trapped" | "mission_complete"
         """
-        if self.status != "navigating":
+        if self.status not in ("navigating",):
             return self.status
 
-        # Premier appel : initialiser
+        # Pas de goal defini
+        if self.goal is None:
+            self.status = "mission_complete"
+            return self.status
+
+        # Init D* Lite au premier appel (ou apres changement de goal)
         if self._planner is None:
             arrival = self._risk_map.build(grid, rules)
             self._planner = DStarLite(grid, self.safety_margin)
             self._planner.initialize(self.position, self.goal, arrival, current_time)
 
-        # Danger immediat sur la cellule courante ?
+        # Danger immediat ?
         t_here    = self._risk_map.arrival_time.get(self.position, INF)
         in_danger = (
             grid.cells[self.position[0]][self.position[1]].state == CellState.BURNING
@@ -445,6 +495,21 @@ class RobotNavigator:
 
         if self._steps >= self.replan_every or in_danger:
             new_arrival = self._risk_map.build(grid, rules)
+            # En mode multi-WP : filtrer les WP bloques
+            if self._wp_planner is not None:
+                self._wp_planner.filter_reachable(new_arrival, current_time,
+                                                   self.safety_margin)
+                # Si le WP courant est maintenant bloque, passer au suivant
+                if (self._current_wp is not None
+                        and not self._current_wp.reachable
+                        and not self._current_wp.visited):
+                    self.waypoints_log.append(
+                        f"WP {self._current_wp.position} bloque par le feu -> skip"
+                    )
+                    self._current_wp.visited = True   # marquer comme skip
+                    if not self._advance_to_next_waypoint():
+                        return self.status
+
             self._planner.replan(self.position, new_arrival, current_time)
             self._steps = 0
         else:
@@ -453,6 +518,16 @@ class RobotNavigator:
         # Prochain mouvement
         nxt = self._planner.next_move()
         if nxt is None:
+            if self._wp_planner is not None:
+                # WP courant inaccessible -> sauter
+                if self._current_wp is not None:
+                    self._current_wp.visited = True
+                    self.waypoints_log.append(
+                        f"WP {self._current_wp.position} piege -> skip"
+                    )
+                if not self._advance_to_next_waypoint():
+                    return self.status
+                return "navigating"
             self.status = "trapped"
             return self.status
 
@@ -460,13 +535,36 @@ class RobotNavigator:
         self.path_history.append(nxt)
         self._planner.start = nxt
 
+        # Objectif atteint ?
         if self.position == self.goal:
-            self.status = "reached"
+            if self._wp_planner is not None and self._current_wp is not None:
+                self._current_wp.visited = True
+                self._wp_planner.mark_visited(self.goal)
+                self.waypoints_log.append(
+                    f"WP {self.goal} visite ({self._current_wp.label}, "
+                    f"t={current_time:.1f}min)"
+                )
+                if not self._advance_to_next_waypoint():
+                    return self.status
+            else:
+                self.status = "reached"
         return self.status
+
+    # ------------------------------------------------------------------
+    # Utilitaires
+    # ------------------------------------------------------------------
 
     @property
     def planned_path(self) -> List[Pos]:
-        """Chemin planifie courant start -> goal (liste de (row,col))."""
+        """Chemin planifie courant start -> goal courant."""
         if self._planner is None:
             return [self.position]
         return self._planner.get_full_path()
+
+    def coverage_summary(self) -> str:
+        """Resume de la mission multi-waypoint."""
+        if self._wp_planner is None:
+            return f"Mode point-to-point | status={self.status}"
+        return (f"Status={self.status} | "
+                + self._wp_planner.summary()
+                + f" | deplacement={len(self.path_history)} cellules")
