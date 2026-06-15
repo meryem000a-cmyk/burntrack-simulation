@@ -217,6 +217,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# CatBoost training info
+catboost_info/
+
 # Robot Vision Project specific ignores
 robot_vision/datasets/
 robot_vision/.cache/

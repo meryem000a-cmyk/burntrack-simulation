@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "burntrack"
+version = "1.0.0"
+description = "Fire propagation simulation with Rothermel model + AI correction"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scikit-learn>=1.3",
+    "torch>=2.0",
+    "xgboost>=2.0",
+    "lightgbm>=4.0",
+    "catboost>=1.2",
+    "optuna>=3.4",
+    "joblib>=1.3",
+    "matplotlib>=3.7",
+    "python-dotenv>=1.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-cov>=4.0"]
+vision = ["onnxruntime>=1.15", "pillow>=10.0", "opencv-python>=4.8"]
+gee = ["earthengine-api>=1.0"]
+
+[project.scripts]
+burntrack-train = "scripts.train_corrector:main"
+burntrack-synthetic = "scripts.generate_synthetic:main"
+burntrack-real-data = "scripts.build_real_dataset:main"
+burntrack-pipeline = "scripts.run_pipeline:main"
+
+[tool.setuptools.packages.find]
+include = ["burntrack*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
