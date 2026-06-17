@@ -4,11 +4,12 @@ fuel_models.py
 Fuel Models pour BurnTrack - Adaptés au Maroc et à l'Afrique.
 Unités SI : kg/m², m, m²/m³, kJ/kg, %
 
-CORRECTIONS v2 appliquées :
-1. Loadings BEHAVE_STANDARD ×10 (erreur conversion lb/ft² → kg/m²)
-2. Ajout sigma_10h/sigma_100h manquants
-3. Commentaire mx corrigé (% au lieu de fraction)
-4. Validation __post_init__ pour sécurité
+CORRECTIONS v3 appliquées (FUSION) :
+1. Loadings BEHAVE_STANDARD corrects (kg/m²) - depuis Script 2
+2. Deltas BEHAVE_STANDARD précis (m) - depuis Script 1 (ex: GR1=0.1219m, pas 0.305m)
+3. Ajout sigma_10h/sigma_100h manquants
+4. Commentaire mx corrigé (% au lieu de fraction)
+5. Validation __post_init__ pour sécurité
 """
 
 from dataclasses import dataclass, field
@@ -41,7 +42,8 @@ class FuelModel:
 
     def __post_init__(self):
         """Validation de base pour éviter des modèles corrompus."""
-        if self.w_1h < 0 or self.w_10h < 0 or self.w_100h < 0 or            self.w_live_herb < 0 or self.w_live_woody < 0:
+        if self.w_1h < 0 or self.w_10h < 0 or self.w_100h < 0 or \
+           self.w_live_herb < 0 or self.w_live_woody < 0:
             raise ValueError(f"Charges négatives interdites pour {self.code}")
         if self.delta <= 0:
             raise ValueError(f"Profondeur delta <= 0 interdite pour {self.code}")
@@ -66,15 +68,17 @@ class FuelModel:
         return f"FuelModel({self.code}: {self.name}, w_total={self.w_total:.3f} kg/m²)"
 
 
+# =============================================================================
 # MODÈLES STANDARD BEHAVE (convertis en SI depuis lb/ft², ft, BTU/lb)
-# CORRECTION v2 : Loadings ×10 (erreur conversion originale)
+# CORRECTION v3 : Loadings corrects (Script 2) + Deltas précis (Script 1)
 # =============================================================================
 
 BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GR1": FuelModel(
         code="GR1", name="Short, sparse, dry climate grass",
         w_1h=1.66, w_10h=0.0, w_100h=0.0, w_live_herb=0.67, w_live_woody=0.0,
-        delta=0.305, sigma_1h=11483, sigma_10h=0.0, sigma_100h=0.0,
+        delta=0.1219,  # 0.4 ft (précis)
+        sigma_1h=11483, sigma_10h=0.0, sigma_100h=0.0,
         sigma_live_herb=10499, sigma_live_woody=0.0,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
@@ -83,7 +87,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GR2": FuelModel(
         code="GR2", name="Low load, dry climate grass",
         w_1h=1.66, w_10h=0.0, w_100h=0.0, w_live_herb=2.20, w_live_woody=0.0,
-        delta=0.305, sigma_1h=10499, sigma_10h=0.0, sigma_100h=0.0,
+        delta=0.3048,  # 1.0 ft
+        sigma_1h=10499, sigma_10h=0.0, sigma_100h=0.0,
         sigma_live_herb=9449, sigma_live_woody=0.0,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
@@ -92,7 +97,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GR3": FuelModel(
         code="GR3", name="Low load, very coarse, humid climate grass",
         w_1h=1.66, w_10h=6.69, w_100h=0.0, w_live_herb=3.27, w_live_woody=0.0,
-        delta=0.610, sigma_1h=7874, sigma_10h=11483, sigma_100h=0.0,
+        delta=0.6096,  # 2.0 ft
+        sigma_1h=7874, sigma_10h=11483, sigma_100h=0.0,
         sigma_live_herb=6823, sigma_live_woody=0.0,
         h_dead=18608, h_live=18608, mx=30,
         is_dynamic=True, region="general",
@@ -101,7 +107,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GR4": FuelModel(
         code="GR4", name="Moderate load, dry climate grass",
         w_1h=4.15, w_10h=0.0, w_100h=0.0, w_live_herb=4.18, w_live_woody=0.0,
-        delta=0.610, sigma_1h=10499, sigma_10h=0.0, sigma_100h=0.0,
+        delta=0.6096,  # 2.0 ft
+        sigma_1h=10499, sigma_10h=0.0, sigma_100h=0.0,
         sigma_live_herb=9449, sigma_live_woody=0.0,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
@@ -110,7 +117,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GR5": FuelModel(
         code="GR5", name="Low load, humid climate grass",
         w_1h=6.67, w_10h=0.0, w_100h=0.0, w_live_herb=5.49, w_live_woody=0.0,
-        delta=0.457, sigma_1h=9449, sigma_10h=0.0, sigma_100h=0.0,
+        delta=0.4572,  # 1.5 ft
+        sigma_1h=9449, sigma_10h=0.0, sigma_100h=0.0,
         sigma_live_herb=8399, sigma_live_woody=0.0,
         h_dead=18608, h_live=18608, mx=40,
         is_dynamic=True, region="general",
@@ -119,7 +127,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GR6": FuelModel(
         code="GR6", name="Moderate load, humid climate grass",
         w_1h=1.66, w_10h=0.0, w_100h=0.0, w_live_herb=7.47, w_live_woody=0.0,
-        delta=0.457, sigma_1h=11483, sigma_10h=0.0, sigma_100h=0.0,
+        delta=0.4572,  # 1.5 ft
+        sigma_1h=11483, sigma_10h=0.0, sigma_100h=0.0,
         sigma_live_herb=10499, sigma_live_woody=0.0,
         h_dead=20934, h_live=20934, mx=40,
         is_dynamic=True, region="general",
@@ -128,7 +137,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GR7": FuelModel(
         code="GR7", name="High load, dry climate grass",
         w_1h=16.28, w_10h=0.0, w_100h=0.0, w_live_herb=11.89, w_live_woody=0.0,
-        delta=0.914, sigma_1h=10499, sigma_10h=0.0, sigma_100h=0.0,
+        delta=0.9144,  # 3.0 ft
+        sigma_1h=10499, sigma_10h=0.0, sigma_100h=0.0,
         sigma_live_herb=9449, sigma_live_woody=0.0,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
@@ -137,7 +147,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GR8": FuelModel(
         code="GR8", name="High load, very coarse, humid climate grass",
         w_1h=7.96, w_10h=16.28, w_100h=0.0, w_live_herb=16.03, w_live_woody=0.0,
-        delta=1.219, sigma_1h=7874, sigma_10h=11483, sigma_100h=0.0,
+        delta=1.2192,  # 4.0 ft
+        sigma_1h=7874, sigma_10h=11483, sigma_100h=0.0,
         sigma_live_herb=6823, sigma_live_woody=0.0,
         h_dead=18608, h_live=18608, mx=30,
         is_dynamic=True, region="general",
@@ -146,7 +157,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GR9": FuelModel(
         code="GR9", name="Very high load, humid climate grass",
         w_1h=16.28, w_10h=16.28, w_100h=0.0, w_live_herb=19.76, w_live_woody=0.0,
-        delta=1.524, sigma_1h=9449, sigma_10h=11483, sigma_100h=0.0,
+        delta=1.524,  # 5.0 ft
+        sigma_1h=9449, sigma_10h=11483, sigma_100h=0.0,
         sigma_live_herb=8399, sigma_live_woody=0.0,
         h_dead=18608, h_live=18608, mx=40,
         is_dynamic=True, region="general",
@@ -155,7 +167,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GS1": FuelModel(
         code="GS1", name="Low load, dry climate grass-shrub",
         w_1h=3.32, w_10h=0.0, w_100h=0.0, w_live_herb=1.08, w_live_woody=1.44,
-        delta=0.274, sigma_1h=10499, sigma_10h=0.0, sigma_100h=0.0,
+        delta=0.2743,  # 0.9 ft
+        sigma_1h=10499, sigma_10h=0.0, sigma_100h=0.0,
         sigma_live_herb=9449, sigma_live_woody=9449,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
@@ -164,7 +177,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GS2": FuelModel(
         code="GS2", name="Moderate load, dry climate grass-shrub",
         w_1h=7.96, w_10h=7.96, w_100h=0.0, w_live_herb=1.31, w_live_woody=2.20,
-        delta=0.457, sigma_1h=10499, sigma_10h=11483, sigma_100h=0.0,
+        delta=0.4572,  # 1.5 ft
+        sigma_1h=10499, sigma_10h=11483, sigma_100h=0.0,
         sigma_live_herb=9449, sigma_live_woody=9449,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
@@ -173,7 +187,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GS3": FuelModel(
         code="GS3", name="Moderate load, humid climate grass-shrub",
         w_1h=4.98, w_10h=4.15, w_100h=0.0, w_live_herb=3.18, w_live_woody=2.73,
-        delta=0.549, sigma_1h=9449, sigma_10h=11483, sigma_100h=0.0,
+        delta=0.5486,  # 1.8 ft
+        sigma_1h=9449, sigma_10h=11483, sigma_100h=0.0,
         sigma_live_herb=8399, sigma_live_woody=8399,
         h_dead=18608, h_live=18608, mx=40,
         is_dynamic=True, region="general",
@@ -182,7 +197,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "GS4": FuelModel(
         code="GS4", name="High load, humid climate grass-shrub",
         w_1h=30.91, w_10h=4.98, w_100h=1.66, w_live_herb=7.47, w_live_woody=15.61,
-        delta=0.640, sigma_1h=9449, sigma_10h=11483, sigma_100h=4572,
+        delta=0.6401,  # 2.1 ft
+        sigma_1h=9449, sigma_10h=11483, sigma_100h=4572,
         sigma_live_herb=8399, sigma_live_woody=8399,
         h_dead=18608, h_live=18608, mx=40,
         is_dynamic=True, region="general",
@@ -191,7 +207,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "SH1": FuelModel(
         code="SH1", name="Low load, dry climate shrub",
         w_1h=4.15, w_10h=4.15, w_100h=0.0, w_live_herb=0.31, w_live_woody=2.83,
-        delta=0.305, sigma_1h=10499, sigma_10h=11483, sigma_100h=0.0,
+        delta=0.3048,  # 1.0 ft
+        sigma_1h=10499, sigma_10h=11483, sigma_100h=0.0,
         sigma_live_herb=9449, sigma_live_woody=8399,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
@@ -200,7 +217,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "SH2": FuelModel(
         code="SH2", name="Moderate load, dry climate shrub",
         w_1h=22.87, w_10h=40.57, w_100h=12.86, w_live_herb=0.0, w_live_woody=65.16,
-        delta=0.305, sigma_1h=10499, sigma_10h=11483, sigma_100h=4572,
+        delta=0.3048,  # 1.0 ft
+        sigma_1h=10499, sigma_10h=11483, sigma_100h=4572,
         sigma_live_herb=0.0, sigma_live_woody=8399,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
@@ -209,7 +227,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "SH3": FuelModel(
         code="SH3", name="Moderate load, humid climate shrub",
         w_1h=7.62, w_10h=50.97, w_100h=0.0, w_live_herb=0.0, w_live_woody=105.15,
-        delta=0.732, sigma_1h=8399, sigma_10h=11483, sigma_100h=0.0,
+        delta=0.7315,  # 2.4 ft
+        sigma_1h=8399, sigma_10h=11483, sigma_100h=0.0,
         sigma_live_herb=0.0, sigma_live_woody=7349,
         h_dead=18608, h_live=18608, mx=40,
         is_dynamic=True, region="general",
@@ -218,7 +237,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "SH4": FuelModel(
         code="SH4", name="Low load, humid climate timber-shrub",
         w_1h=14.55, w_10h=19.40, w_100h=3.47, w_live_herb=0.0, w_live_woody=43.33,
-        delta=0.914, sigma_1h=10499, sigma_10h=11483, sigma_100h=4572,
+        delta=0.9144,  # 3.0 ft
+        sigma_1h=10499, sigma_10h=11483, sigma_100h=4572,
         sigma_live_herb=0.0, sigma_live_woody=8399,
         h_dead=18608, h_live=18608, mx=30,
         is_dynamic=True, region="general",
@@ -227,7 +247,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "SH5": FuelModel(
         code="SH5", name="High load, dry climate shrub",
         w_1h=61.00, w_10h=35.58, w_100h=0.0, w_live_herb=0.0, w_live_woody=49.20,
-        delta=1.829, sigma_1h=3937, sigma_10h=11483, sigma_100h=0.0,
+        delta=1.8288,  # 6.0 ft
+        sigma_1h=3937, sigma_10h=11483, sigma_100h=0.0,
         sigma_live_herb=0.0, sigma_live_woody=8399,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
@@ -236,7 +257,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "SH6": FuelModel(
         code="SH6", name="Low load, humid climate shrub",
         w_1h=49.22, w_10h=24.61, w_100h=0.0, w_live_herb=0.0, w_live_woody=23.54,
-        delta=0.610, sigma_1h=3937, sigma_10h=11483, sigma_100h=0.0,
+        delta=0.6096,  # 2.0 ft
+        sigma_1h=3937, sigma_10h=11483, sigma_100h=0.0,
         sigma_live_herb=0.0, sigma_live_woody=8399,
         h_dead=18608, h_live=18608, mx=30,
         is_dynamic=True, region="general",
@@ -245,7 +267,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "SH7": FuelModel(
         code="SH7", name="Very high load, dry climate shrub",
         w_1h=59.29, w_10h=89.77, w_100h=37.04, w_live_herb=0.0, w_live_woody=57.54,
-        delta=1.829, sigma_1h=3937, sigma_10h=11483, sigma_100h=4572,
+        delta=1.8288,  # 6.0 ft
+        sigma_1h=3937, sigma_10h=11483, sigma_100h=4572,
         sigma_live_herb=0.0, sigma_live_woody=8399,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
@@ -254,7 +277,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "SH8": FuelModel(
         code="SH8", name="High load, humid climate shrub",
         w_1h=34.66, w_10h=57.54, w_100h=14.55, w_live_herb=0.0, w_live_woody=73.48,
-        delta=0.914, sigma_1h=3937, sigma_10h=11483, sigma_100h=4572,
+        delta=0.9144,  # 3.0 ft
+        sigma_1h=3937, sigma_10h=11483, sigma_100h=4572,
         sigma_live_herb=0.0, sigma_live_woody=7874,
         h_dead=18608, h_live=18608, mx=40,
         is_dynamic=True, region="general",
@@ -263,7 +287,8 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
     "SH9": FuelModel(
         code="SH9", name="Very high load, humid climate shrub",
         w_1h=76.26, w_10h=41.55, w_100h=0.0, w_live_herb=2.45, w_live_woody=118.49,
-        delta=1.341, sigma_1h=3937, sigma_10h=11483, sigma_100h=0.0,
+        delta=1.3411,  # 4.4 ft
+        sigma_1h=3937, sigma_10h=11483, sigma_100h=0.0,
         sigma_live_herb=9449, sigma_live_woody=7874,
         h_dead=18608, h_live=18608, mx=40,
         is_dynamic=True, region="general",
@@ -272,6 +297,7 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
 }
 
 
+# =============================================================================
 # MODÈLES AFRIQUE DU NORD / MAROC
 # CORRECTION v2 : Ajout sigma_10h/sigma_100h manquants
 # =============================================================================
@@ -698,7 +724,7 @@ def compute_dynamic_herb_load(fuel_model: FuelModel, live_herb_moisture: float) 
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("FUEL MODELS BURNTRACK - AFRIQUE v2 (CORRIGÉ)")
+    print("FUEL MODELS BURNTRACK - AFRIQUE v3 (FUSION CORRECTE)")
     print("=" * 70)
     print(f"\nTotal fuel models: {len(ALL_FUEL_MODELS)}")
     print(f"  - Behave standard: {len(BEHAVE_STANDARD)}")
@@ -709,12 +735,12 @@ if __name__ == "__main__":
 
     # Test de validation
     print("\n" + "=" * 70)
-    print("VALIDATION DES MODÈLES")
+    print("VALIDATION DES MODÈLES (vérification deltas précis)")
     print("=" * 70)
-    for code in ["GR1", "AF_STEPPE", "AF_MIOMBO"]:
+    for code in ["GR1", "GR7", "SH2", "AF_STEPPE", "AF_MIOMBO"]:
         fm = get_fuel_model(code)
         if fm:
             print(f"\n{code}: {fm.name}")
-            print(f"  w_total={fm.w_total:.2f} kg/m², delta={fm.delta:.2f} m")
+            print(f"  w_total={fm.w_total:.2f} kg/m², delta={fm.delta:.4f} m")
             print(f"  sigma_1h={fm.sigma_1h}, sigma_10h={fm.sigma_10h}, sigma_100h={fm.sigma_100h}")
             print(f"  mx={fm.mx}% (fraction={fm.mx/100:.2f})")
