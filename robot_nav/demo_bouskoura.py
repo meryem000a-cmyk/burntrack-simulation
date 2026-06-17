@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 from cellular_automaton import Grid, FireSimulation, PropagationRules
 from robot_nav import RobotNavigator, WaypointPlanner, GPSGrid
-from rothermel.fuel_models import ALL_FUEL_MODELS
+from burntrack.engine.fuel_models import ALL_FUEL_MODELS
 
 # ---------------------------------------------------------------------------
 # 1. Grille type Bouskoura
