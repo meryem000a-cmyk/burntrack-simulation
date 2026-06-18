@@ -53,18 +53,23 @@ def download_firms_region(
     region_name: str,
     bbox: str = None,
     date_start: datetime = None,
-    days_range: int = 4,
+    days_range: int = 30,
+    chunk_days: int = 5,
     sensor_source: str = "VIIRS_NOAA20_NRT",
 ) -> pd.DataFrame:
     """Download FIRMS active fire data for a single region.
+
+    Supports ranges >5 days by chunking into API-compatible requests
+    (FIRMS Area API only accepts DAY_RANGE of 1-5).
 
     Args:
         api_key: NASA FIRMS API key.
         region_name: Label for the region (used as metadata).
         bbox: Bounding box string "lon1,lat1,lon2,lat2". Uses AFRICA_REGIONS
               if not provided.
-        date_start: Start date. Defaults to 10 June 2026.
-        days_range: Number of days of data to fetch.
+        date_start: Start date. Defaults to 30 days before today.
+        days_range: Number of days of data to fetch (can be >5).
+        chunk_days: Max days per API request (max 5 per FIRMS limit).
         sensor_source: Sensor identifier (default VIIRS_NOAA20_NRT, 375 m).
 
     Returns:
@@ -76,30 +81,55 @@ def download_firms_region(
             raise ValueError(f"Unknown region '{region_name}'. Available: {list(AFRICA_REGIONS.keys())}")
 
     if date_start is None:
-        date_start = datetime(2026, 6, 10)
+        date_start = datetime.now() - timedelta(days=days_range)
 
-    date_str = date_start.strftime("%Y-%m-%d")
-    url = (
-        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/"
-        f"{api_key}/{sensor_source}/{bbox}/{days_range}/{date_str}"
-    )
+    all_chunks = []
+    current_date = date_start
+    remaining = days_range
+    chunk_num = 0
 
-    try:
-        response = request_with_retry(url)
-        df = pd.read_csv(response.url)
-        print(f"  [{region_name.upper()}] Loaded: {len(df)} detections.")
-        df["region"] = region_name
-        return df
-    except Exception as e:
-        print(f"  [{region_name.upper()}] Download error: {e}")
+    while remaining > 0:
+        this_chunk = min(chunk_days, remaining)
+        date_str = current_date.strftime("%Y-%m-%d")
+        url = (
+            f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/"
+            f"{api_key}/{sensor_source}/{bbox}/{this_chunk}/{date_str}"
+        )
+
+        try:
+            response = request_with_retry(url)
+            chunk_df = pd.read_csv(response.url)
+            if not chunk_df.empty:
+                chunk_df["region"] = region_name
+                all_chunks.append(chunk_df)
+                chunk_num += 1
+                print(f"  [{region_name.upper()}] Chunk {chunk_num} ({date_str}+{this_chunk}d): {len(chunk_df)} detections")
+            else:
+                print(f"  [{region_name.upper()}] Chunk ({date_str}+{this_chunk}d): empty")
+        except Exception as e:
+            print(f"  [{region_name.upper()}] Chunk error ({date_str}): {e}")
+
+        current_date += timedelta(days=this_chunk)
+        remaining -= this_chunk
+        time.sleep(0.5)
+
+    if not all_chunks:
         return pd.DataFrame()
+
+    combined = pd.concat(all_chunks, ignore_index=True)
+    combined = combined.drop_duplicates(
+        subset=["latitude", "longitude", "acq_date", "acq_time"]
+    )
+    print(f"  [{region_name.upper()}] Total unique: {len(combined)} detections over {days_range} days")
+    return combined
 
 
 def download_all_africa_fires(
     api_key: str,
     regions_dict: dict = None,
     date_start: datetime = None,
-    days_range: int = 4,
+    days_range: int = 30,
+    chunk_days: int = 5,
     sensor_source: str = "VIIRS_NOAA20_NRT",
 ) -> pd.DataFrame:
     """Download active fire data for all African regions in parallel.
@@ -107,8 +137,9 @@ def download_all_africa_fires(
     Args:
         api_key: NASA FIRMS API key.
         regions_dict: Dict of {name: bbox} per region. Defaults to AFRICA_REGIONS.
-        date_start: Start date. Defaults to 10 June 2026.
+        date_start: Start date. Defaults to 30 days before today.
         days_range: Number of days of data.
+        chunk_days: Max days per API request.
         sensor_source: Sensor identifier.
 
     Returns:
@@ -118,11 +149,11 @@ def download_all_africa_fires(
         regions_dict = AFRICA_REGIONS
 
     if date_start is None:
-        date_start = datetime(2026, 6, 10)
+        date_start = datetime.now() - timedelta(days=days_range)
 
     print(
         f"  Launching parallel download for Africa "
-        f"({len(regions_dict)} regions)..."
+        f"({len(regions_dict)} regions, {days_range} days)..."
     )
 
     all_dfs = []
@@ -137,6 +168,7 @@ def download_all_africa_fires(
                 bbox,
                 date_start,
                 days_range,
+                chunk_days,
                 sensor_source,
             ): name
             for name, bbox in regions_dict.items()

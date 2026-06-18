@@ -524,7 +524,7 @@ def compute_slope_aspect(lat: float, lon: float, wind_dir: float = 0.0) -> Dict:
 # BATCH WEATHER FETCHING (extracted from build_real_dataset.py)
 # =============================================================================
 
-MAX_WEATHER_SAMPLES = 400
+MAX_WEATHER_SAMPLES = 5000
 
 
 def fetch_weather_for_points(df: pd.DataFrame) -> pd.DataFrame:

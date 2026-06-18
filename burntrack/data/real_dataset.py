@@ -22,6 +22,7 @@ Fixes applied (vs original build_real_dataset.py):
 import os
 import sys
 import warnings
+from datetime import timedelta
 
 import numpy as np
 import pandas as pd
@@ -397,10 +398,10 @@ def build_real_dataset(
     Returns:
         DataFrame with the complete real dataset.
     """
-    from datetime import datetime
+    from datetime import datetime as _dt
 
     if date_start is None:
-        date_start = datetime(2026, 6, 10)
+        date_start = _dt.now() - timedelta(days=days_range)
 
     print("=" * 75)
     print("  BURNTRACK — REAL PAN-AFRICAN DATASET PIPELINE")
