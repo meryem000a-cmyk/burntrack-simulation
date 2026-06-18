@@ -1,3 +1,0 @@
-"""
-BurnTrack - Package src
-"""
