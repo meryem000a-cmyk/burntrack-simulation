@@ -62,13 +62,12 @@ class TestCorrectorRF:
     SCALER_PATH = os.path.join(PROJECT_ROOT, "models", "rf_scaler.joblib")
 
     RF_FEATURES = [
-        "ros_rothermel", "ros_terrain", "temp_c", "rh_percent", "wind_speed_ms",
-        "wind_10m", "vpd_kpa", "slope_deg", "slope_pct", "angle_wind_slope",
+        "ros_rothermel", "temp_c", "rh_percent", "wind_speed_ms", "vpd_kpa",
+        "slope_deg", "slope_pct", "angle_wind_slope",
         "w_total_kg_m2", "w_dead_kg_m2", "w_live_kg_m2", "delta_m", "sigma_m2_m3",
         "mx_percent", "h_dead_kj_kg", "phi_w", "phi_s", "phi_eff",
         "beta", "beta_opt", "beta_ratio", "gamma", "eta_M", "eta_S",
-        "I_R_kW_m2", "xi", "tau_min", "ndvi", "ndwi", "lst_c",
-        "dfmc_percent", "m_1h", "m_10h", "m_100h", "m_live_herb", "m_live_woody",
+        "I_R_kW_m2", "xi", "tau_min", "ndvi", "ndwi", "lst_c", "dfmc_percent",
     ]
 
     def setup_method(self):
@@ -83,25 +82,25 @@ class TestCorrectorRF:
         assert self.scaler is not None
 
     def test_feature_count(self):
-        assert self.scaler.n_features_in_ == 38
+        assert self.scaler.n_features_in_ == 31
 
     def test_prediction_shape(self):
-        x = np.zeros((1, 38), dtype=np.float64)
+        x = np.zeros((1, 31), dtype=np.float64)
         x_scaled = self.scaler.transform(x)
         pred = self.model.predict(x_scaled)
         assert pred.shape == (1,)
 
     def test_prediction_is_finite(self):
-        x = np.random.rand(5, 38).astype(np.float64)
+        x = np.random.rand(5, 31).astype(np.float64)
         x_scaled = self.scaler.transform(x)
         preds = self.model.predict(x_scaled)
         assert np.all(np.isfinite(preds)), "Predictions should be finite"
 
     def test_hot_dry_gives_positive_delta(self):
-        x = np.zeros((1, 38), dtype=np.float64)
+        x = np.zeros((1, 31), dtype=np.float64)
         x[0, 0] = 2.0   # ros_rothermel
-        x[0, 2] = 35.0  # temp_c (hot)
-        x[0, 3] = 10.0  # rh_percent (dry)
+        x[0, 1] = 35.0  # temp_c (hot)
+        x[0, 2] = 10.0  # rh_percent (dry)
         x_scaled = self.scaler.transform(x)
         delta = float(self.model.predict(x_scaled)[0])
         assert np.isfinite(delta)
@@ -195,9 +194,9 @@ class TestPipelineEndToEnd:
         assert np.isfinite(corr["delta_ros"])
 
     def test_pipeline_feature_count(self):
-        assert len(self.runner.RF_FEATURE_NAMES) == 38
+        assert len(self.runner.RF_FEATURE_NAMES) == 31
         assert self.runner.scaler is not None
-        assert self.runner.scaler.n_features_in_ == 38
+        assert self.runner.scaler.n_features_in_ == 31
 
     def test_pipeline_with_robot_data(self):
         robot_data = {

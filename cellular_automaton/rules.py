@@ -304,13 +304,12 @@ class PropagationRules:
 # ---------------------------------------------------------------------------
 
 RF_FEATURE_NAMES = [
-    "ros_rothermel", "ros_terrain", "temp_c", "rh_percent", "wind_speed_ms",
-    "wind_10m", "vpd_kpa", "slope_deg", "slope_pct", "angle_wind_slope",
+    "ros_rothermel", "temp_c", "rh_percent", "wind_speed_ms", "vpd_kpa",
+    "slope_deg", "slope_pct", "angle_wind_slope",
     "w_total_kg_m2", "w_dead_kg_m2", "w_live_kg_m2", "delta_m", "sigma_m2_m3",
     "mx_percent", "h_dead_kj_kg", "phi_w", "phi_s", "phi_eff",
     "beta", "beta_opt", "beta_ratio", "gamma", "eta_M", "eta_S",
-    "I_R_kW_m2", "xi", "tau_min", "ndvi", "ndwi", "lst_c",
-    "dfmc_percent", "m_1h", "m_10h", "m_100h", "m_live_herb", "m_live_woody",
+    "I_R_kW_m2", "xi", "tau_min", "ndvi", "ndwi", "lst_c", "dfmc_percent",
 ]
 
 
@@ -368,11 +367,9 @@ class CorrectorV3Adapter:
 
         return {
             "ros_rothermel": output.ros if output else getattr(cell, '_base_ros', 0.0),
-            "ros_terrain": output.ros if output else getattr(cell, '_base_ros', 0.0),
             "temp_c": temp_c,
             "rh_percent": rh_percent,
             "wind_speed_ms": cell.wind_speed_ms,
-            "wind_10m": cell.wind_speed_ms * 2.5,
             "vpd_kpa": vpd,
             "slope_deg": slope_deg,
             "slope_pct": slope_pct,
@@ -400,11 +397,6 @@ class CorrectorV3Adapter:
             "ndwi": getattr(cell, 'ndwi', -0.1),
             "lst_c": getattr(cell, 'lst', temp_c + 10.0),
             "dfmc_percent": dfmc,
-            "m_1h": cell.moisture.m_1h,
-            "m_10h": cell.moisture.m_10h,
-            "m_100h": cell.moisture.m_100h,
-            "m_live_herb": cell.moisture.m_live_herb,
-            "m_live_woody": cell.moisture.m_live_woody,
         }
 
     def predict_delta_ros(self, cell: Cell, output: RothermelOutput) -> float:

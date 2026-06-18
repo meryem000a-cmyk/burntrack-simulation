@@ -24,13 +24,12 @@ sys.path.insert(0, PROJECT_ROOT)
 
 class PipelineRunner:
     RF_FEATURE_NAMES = [
-        "ros_rothermel", "ros_terrain", "temp_c", "rh_percent", "wind_speed_ms",
-        "wind_10m", "vpd_kpa", "slope_deg", "slope_pct", "angle_wind_slope",
+        "ros_rothermel", "temp_c", "rh_percent", "wind_speed_ms", "vpd_kpa",
+        "slope_deg", "slope_pct", "angle_wind_slope",
         "w_total_kg_m2", "w_dead_kg_m2", "w_live_kg_m2", "delta_m", "sigma_m2_m3",
         "mx_percent", "h_dead_kj_kg", "phi_w", "phi_s", "phi_eff",
         "beta", "beta_opt", "beta_ratio", "gamma", "eta_M", "eta_S",
-        "I_R_kW_m2", "xi", "tau_min", "ndvi", "ndwi", "lst_c",
-        "dfmc_percent", "m_1h", "m_10h", "m_100h", "m_live_herb", "m_live_woody",
+        "I_R_kW_m2", "xi", "tau_min", "ndvi", "ndwi", "lst_c", "dfmc_percent",
     ]
 
     def __init__(self, model_dir: str = "models"):
@@ -198,11 +197,9 @@ class PipelineRunner:
 
         features = {
             "ros_rothermel": rothermel_out.get("ros_m_min", 0.0),
-            "ros_terrain": rothermel_out.get("ros_m_min", 0.0),
             "temp_c": temp_air,
             "rh_percent": rh,
             "wind_speed_ms": wind_speed,
-            "wind_10m": wind_speed * 2.5,
             "vpd_kpa": vpd,
             "slope_deg": robot_data.get("slope_deg", 0.0) if robot_data else 0.0,
             "slope_pct": slope_pct,
@@ -230,11 +227,6 @@ class PipelineRunner:
             "ndwi": robot_data.get("ndwi", -0.1) if robot_data else -0.1,
             "lst_c": robot_data.get("lst", temp_air + 10.0) if robot_data else temp_air + 10.0,
             "dfmc_percent": dfmc,
-            "m_1h": env["m_1h"],
-            "m_10h": env["m_10h"],
-            "m_100h": env["m_100h"],
-            "m_live_herb": env["m_live_herb"],
-            "m_live_woody": env["m_live_woody"],
         }
 
         ia_out = self._apply_corrector(rothermel_out, features)
