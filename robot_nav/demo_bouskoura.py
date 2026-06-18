@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 from cellular_automaton import Grid, FireSimulation, PropagationRules
+from cellular_automaton.mlp_corrector import MLPCorrector
 from robot_nav import RobotNavigator, WaypointPlanner, GPSGrid
 from burntrack.engine.fuel_models import ALL_FUEL_MODELS
 
@@ -44,6 +45,19 @@ grid.add_firebreak(0,  33, ROWS-1, 33)   # piste verticale Est
 
 print(f"Grille : {ROWS}x{COLS} ({ROWS*CELL_SIZE/1000:.1f}km x {COLS*CELL_SIZE/1000:.1f}km)")
 print(f"Coupe-feux : ligne 25 horizontale + colonnes 16 et 33 verticales")
+
+# ---------------------------------------------------------------------------
+# 1b. Correction MLP (delta_ros pre-calcule sur toute la grille)
+# ---------------------------------------------------------------------------
+_MODEL_PATH  = "models/corrector_v3_best.pt"
+_SCALER_PATH = "models/mlp_v2_scaler.joblib"
+
+try:
+    mlp_corrector = MLPCorrector(model_path=_MODEL_PATH, scaler_path=_SCALER_PATH)
+    mlp_corrector.apply_to_grid(grid)
+    print(f"Correcteur MLP charge : delta_ros applique sur {ROWS*COLS} cellules")
+except FileNotFoundError as e:
+    print(f"[WARN] Correcteur MLP non charge ({e}) — Rothermel brut utilise")
 
 # ---------------------------------------------------------------------------
 # 2. GPS Bouskoura

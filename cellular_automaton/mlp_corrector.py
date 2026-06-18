@@ -189,7 +189,7 @@ class MLPCorrector:
 
         return np.array([[
             cell.wind_speed_ms,
-            cell.rh_percent,
+            getattr(cell, "rh_percent", 50.0),  # Cell n'a pas rh_percent, defaut 50%
             cell.slope_pct,
             ros_rothermel,
             fuel_props["h_dead_kj_kg"],
