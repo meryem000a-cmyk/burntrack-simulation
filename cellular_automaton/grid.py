@@ -40,10 +40,12 @@ class Cell:
         aspect_deg     : Orientation de la pente (degrés, 0=Nord, sens horaire)
         elevation_m    : Altitude (m)
         wind_speed_ms  : Vitesse du vent local (m/s)
-        wind_dir_deg   : Direction d'où vient le vent (degrés, convention météo)
-        ignition_time  : Temps d'ignition en minutes depuis t=0, None si non brûlé
-        burn_duration  : Durée de combustion (min) — calculée par Rothermel à l'ignition
-        burn_elapsed   : Temps écoulé en combustion (min)
+    wind_dir_deg   : Direction d'où vient le vent (degrés, convention météo)
+    ignition_time  : Temps d'ignition en minutes depuis t=0, None si non brûlé
+    burn_duration  : Durée de combustion (min) — calculée par Rothermel à l'ignition
+    burn_elapsed   : Temps écoulé en combustion (min)
+    rh_percent     : Humidité relative de l'air (%) — requis pour le MLP
+    temp_c         : Température de l'air (°C) — requis pour le MLP
     """
     state: CellState = CellState.UNBURNED
     fuel_code: str = "GR2"
@@ -57,6 +59,8 @@ class Cell:
     burn_duration: float = 10.0      # sera recalculé à l'ignition
     burn_elapsed: float = 0.0
     delta_ros: float = 0.0           # correction IA du ROS
+    rh_percent: float = 50.0         # humidité relative (%) — pour MLP
+    temp_c: float = 25.0             # température (°C) — pour MLP
 
 
 class Grid:
@@ -220,6 +224,8 @@ class Grid:
         wind_dir: np.ndarray,            # (rows, cols) float, degrés
         moisture_1h: np.ndarray,         # (rows, cols) float, fraction
         cell_size: float = 30.0,
+        rh_percent: np.ndarray = None,   # (rows, cols) float, % — requis pour MLP
+        temp_c: np.ndarray = None,       # (rows, cols) float, °C — requis pour MLP
     ) -> "Grid":
         """
         Crée une grille à partir d'arrays numpy (données raster GIS / ERA5).
@@ -244,6 +250,10 @@ class Grid:
                     m_live_herb=min(m * 6, 1.0),
                     m_live_woody=min(m * 8, 1.0),
                 )
+                if rh_percent is not None:
+                    c.rh_percent = float(rh_percent[i, j])
+                if temp_c is not None:
+                    c.temp_c = float(temp_c[i, j])
         return g
 
     def add_firebreak(
