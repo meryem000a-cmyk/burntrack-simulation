@@ -228,5 +228,9 @@ robot_vision/runs/
 robot_vision/yolos/
 robot_vision/eval_images/
 *.npy
-*.pt
+
+# Model files (tracked separately or too large)
+models/*.pt
+models/*.joblib
+models/*.json
 
