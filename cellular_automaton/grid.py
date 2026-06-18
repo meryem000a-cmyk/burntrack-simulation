@@ -15,8 +15,8 @@ from typing import Dict, Generator, List, Optional, Tuple
 import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from rothermel.fuel_models import FuelModel, ALL_FUEL_MODELS
-from rothermel.rothermel_engine_v3 import MoistureInputs
+from burntrack.engine.fuel_models import FuelModel, ALL_FUEL_MODELS
+from burntrack.engine.rothermel import MoistureInputs
 
 
 class CellState(IntEnum):
@@ -56,6 +56,7 @@ class Cell:
     ignition_time: Optional[float] = None
     burn_duration: float = 10.0      # sera recalculé à l'ignition
     burn_elapsed: float = 0.0
+    delta_ros: float = 0.0           # correction IA du ROS
 
 
 class Grid:

@@ -17,17 +17,17 @@ Note sur tau Rothermel :
 
 import numpy as np
 import sys, os
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from rothermel.rothermel_engine_v3 import (
+from burntrack.engine.rothermel import (
     RothermelEngine,
     FuelModel as RothFuelModel,
     MoistureInputs,
     EnvironmentalConditions,
     RothermelOutput,
 )
-from rothermel.fuel_models import FuelModel as FMFuelModel
+from burntrack.engine.fuel_models import FuelModel as FMFuelModel
 
 from .grid import Grid, Cell, CellState
 
@@ -170,11 +170,13 @@ class PropagationRules:
         )
         output = self.engine.compute(fuel, src.moisture, conditions)
 
-        if output.ros < self.min_ros:
+        ros_eff = max(output.ros + getattr(src, 'delta_ros', 0.0), 0.0)
+
+        if ros_eff < self.min_ros:
             return 0.0
 
         max_dir = _max_spread_direction(src.wind_dir_deg, src.slope_pct, src.aspect_deg)
-        return self._directional_ros(output.ros, max_dir, spread_dir)
+        return self._directional_ros(ros_eff, max_dir, spread_dir)
 
     # ------------------------------------------------------------------
     # Probabilite d'ignition
@@ -295,3 +297,371 @@ class PropagationRules:
             c.burn_duration = self._burn_duration(c, grid)
 
         return len(new_ignitions)
+
+
+# ---------------------------------------------------------------------------
+# CorrectorV3Adapter — ML correcteur de delta_ros
+# ---------------------------------------------------------------------------
+
+class CorrectorV3Adapter:
+    """
+    Adaptateur pour le Corrector V3 (ML).
+
+    Pont entre le modele ML de correction et l'automate cellulaire.
+    Utilise CorrectorFeatureExtractor pour extraire les memes features
+    que le pipeline (run_pipeline.py) — coherence garantie.
+
+    Usage:
+        rules = PropagationRules()
+        adapter = CorrectorV3Adapter(rules)
+        adapter.set_model(mon_modele_entraine, scaler)
+        adapter.apply_to_grid(grid)
+    """
+
+    def __init__(self, rules=None):
+        self.rules = rules
+        self.model = None
+        self.scaler = None
+        self.feature_extractor = None
+        self.env_context = {}
+
+    def set_model(self, model, scaler=None, **env_context):
+        self.model = model
+        self.scaler = scaler
+        self.env_context = env_context
+        from burntrack.corrector.features import CorrectorFeatureExtractor
+        self.feature_extractor = CorrectorFeatureExtractor()
+
+    def _build_cell_features(self, cell: Cell, output=None) -> dict:
+        from burntrack.corrector.features import compute_vpd, compute_dfmc
+
+        temp_c = getattr(cell, 'temp_c', 25.0)
+        rh_percent = getattr(cell, 'rh_percent', 50.0)
+        vpd = compute_vpd(temp_c, rh_percent)
+        dfmc = getattr(cell, 'dfmc', compute_dfmc(temp_c, vpd))
+
+        row = {
+            "ros_rothermel": output.ros if output else getattr(cell, '_base_ros', 0.0),
+            "ros": output.ros if output else getattr(cell, '_base_ros', 0.0),
+            "phi_w": output.phi_w if output else getattr(cell, '_phi_w', 0.0),
+            "phi_s": output.phi_s if output else getattr(cell, '_phi_s', 0.0),
+            "phi_eff": output.phi_eff if output else getattr(cell, '_phi_eff', 0.0),
+            "beta": output.beta if output else 0.0,
+            "beta_opt": output.beta_opt if output else 0.0,
+            "gamma": output.gamma if output else 0.0,
+            "eta_M": output.eta_M if output else 0.0,
+            "eta_S": output.eta_S if output else 0.0,
+            "I_R_kW_m2": output.reaction_intensity if output else 0.0,
+            "reaction_intensity": output.reaction_intensity if output else 0.0,
+            "xi": output.xi if output else 0.0,
+            "tau_min": output.residence_time if output else 0.5,
+            "residence_time": output.residence_time if output else 0.5,
+            "fireline_intensity": output.fireline_intensity if output else 0.0,
+            "wind_speed_ms": cell.wind_speed_ms,
+            "wind_speed": cell.wind_speed_ms,
+            "slope_pct": cell.slope_pct,
+            "slope_deg": getattr(cell, 'slope_deg', 0.0),
+            "aspect_deg": cell.aspect_deg,
+            "angle_wind_slope": getattr(cell, '_angle_wind_slope', 0.0),
+            "m_1h": cell.moisture.m_1h,
+            "m_10h": cell.moisture.m_10h,
+            "m_100h": cell.moisture.m_100h,
+            "m_live_herb": cell.moisture.m_live_herb,
+            "m_live_woody": cell.moisture.m_live_woody,
+            "temp_c": temp_c,
+            "rh_percent": rh_percent,
+            "vpd_kpa": vpd,
+            "dfmc_percent": dfmc,
+            "ndvi": getattr(cell, 'ndvi', 0.3),
+            "ndwi": getattr(cell, 'ndwi', -0.1),
+            "lst_c": getattr(cell, 'lst', temp_c + 10.0),
+            "w_total_kg_m2": getattr(cell, 'w_total_kg_m2', 0.5),
+            "w_dead_kg_m2": getattr(cell, 'w_dead_kg_m2', 0.3),
+            "w_live_kg_m2": getattr(cell, 'w_live_kg_m2', 0.2),
+            "delta_m": getattr(cell, 'delta', 0.3),
+            "sigma_m2_m3": getattr(cell, 'sigma', 1500.0),
+            "mx_percent": getattr(cell, 'mx', 20.0),
+            "h_dead_kj_kg": getattr(cell, 'h_dead', 18622.0),
+            "fuel_model_code": cell.fuel_code,
+            "date": getattr(cell, 'date', ''),
+            "latitude": getattr(cell, 'latitude', 0.0),
+        }
+        row.update(self.env_context)
+        return row
+
+    def predict_delta_ros(self, cell: Cell, output: RothermelOutput) -> float:
+        if self.model is None or self.feature_extractor is None:
+            return 0.0
+        try:
+            features = self._build_cell_features(cell, output)
+            x = self._features_to_array(features)
+            if hasattr(self.model, 'predict'):
+                preds = self.model.predict(x)
+                if hasattr(preds[0], '__len__'):
+                    return float(preds[0][0])
+                return float(preds[0])
+            return 0.0
+        except Exception:
+            return 0.0
+
+    def _features_to_array(self, features: dict) -> np.ndarray:
+        extracted = self.feature_extractor.extract_row(features)
+        feature_names = self.feature_extractor.get_feature_names()
+        n_expected = self._get_expected_n_features()
+        if n_expected is not None and n_expected < len(feature_names):
+            feature_names = feature_names[:n_expected]
+        x = np.array([[extracted.get(name, 0.0) for name in feature_names]], dtype=np.float64)
+        if self.scaler is not None:
+            x = self.scaler.transform(x)
+        return x
+
+    def _get_expected_n_features(self):
+        if self.scaler is not None and hasattr(self.scaler, 'n_features_in_'):
+            return self.scaler.n_features_in_
+        if hasattr(self.model, 'n_features_in_'):
+            return self.model.n_features_in_
+        return None
+
+    def apply_to_grid(self, grid: Grid):
+        if self.model is None or self.feature_extractor is None:
+            return
+
+        all_features = []
+        cell_indices = []
+
+        for i in range(grid.rows):
+            for j in range(grid.cols):
+                c = grid.cells[i][j]
+                features = self._build_cell_features(c, output=None)
+                all_features.append(features)
+                cell_indices.append((i, j))
+
+        if not all_features:
+            return
+
+        extracted_list = [self.feature_extractor.extract_row(f) for f in all_features]
+        feature_names = self.feature_extractor.get_feature_names()
+        n_expected = self._get_expected_n_features()
+        if n_expected is not None and n_expected < len(feature_names):
+            feature_names = feature_names[:n_expected]
+        x = np.array([[f.get(name, 0.0) for name in feature_names] for f in extracted_list], dtype=np.float64)
+
+        if self.scaler is not None:
+            x = self.scaler.transform(x)
+
+        try:
+            predictions = self.model.predict(x)
+        except Exception:
+            return
+
+        for idx, (i, j) in enumerate(cell_indices):
+            grid.cells[i][j].delta_ros = float(predictions[idx])
+
+
+# ---------------------------------------------------------------------------
+# EnsembleSimulation — carte de brulage probabiliste
+# ---------------------------------------------------------------------------
+
+class PerturbationConfig:
+    """
+    Configuration des perturbations pour le mode ensemble.
+
+    Chaque parametre est defini comme (loi, *args) :
+        - ("gauss", mu, sigma)  : tirage gaussien
+        - ("uniform", low, high): tirage uniforme
+        - ("fixed", value)      : valeur fixe (pas de perturbation)
+        - ("lognormal", mu, sigma): tirage log-normal
+    """
+
+    def __init__(
+        self,
+        wind_speed: Tuple = ("gauss", 0.0, 0.2),
+        wind_dir: Tuple = ("gauss", 0.0, 15.0),
+        moisture_1h: Tuple = ("gauss", 0.0, 0.02),
+        fuel_load: Tuple = ("lognormal", 0.0, 0.1),
+    ):
+        self.wind_speed = wind_speed
+        self.wind_dir = wind_dir
+        self.moisture_1h = moisture_1h
+        self.fuel_load = fuel_load
+
+
+class EnsembleSimulation:
+    """
+    Simulation d'ensemble — genere des cartes de brulage probabilistes.
+
+    Cree N realisations en perturbant les entrees (vent, humidite,
+    combustible), execute une simulation complete pour chaque tirage,
+    puis agrege les resultats en carte de probabilite de brulage.
+
+    Usage:
+        ens = EnsembleSimulation(base_grid, n_ensemble=100)
+        prob_map = ens.run(steps=120, dt=1.0, ignite_at=(25, 25))
+    """
+
+    def __init__(
+        self,
+        base_grid: Grid,
+        n_ensemble: int = 50,
+        perturbation: Optional[PerturbationConfig] = None,
+        rules: Optional[PropagationRules] = None,
+        seed: Optional[int] = None,
+    ):
+        self.base_grid = base_grid
+        self.n = n_ensemble
+        self.perturb = perturbation or PerturbationConfig()
+        self.rules = rules
+        self.rng = np.random.default_rng(seed)
+
+    # ------------------------------------------------------------------
+    # Perturbation
+    # ------------------------------------------------------------------
+
+    def _sample_perturbation(self) -> dict:
+        """Tire un jeu de perturbations pour une realisation."""
+
+        def _sample(param: Tuple) -> float:
+            law, *args = param
+            if law == "gauss":
+                return float(self.rng.normal(*args))
+            elif law == "uniform":
+                return float(self.rng.uniform(*args))
+            elif law == "lognormal":
+                return float(self.rng.lognormal(*args))
+            elif law == "fixed":
+                return float(args[0])
+            return 0.0
+
+        return {
+            "delta_wind_speed": _sample(self.perturb.wind_speed),
+            "delta_wind_dir": _sample(self.perturb.wind_dir),
+            "delta_moisture": _sample(self.perturb.moisture_1h),
+            "delta_fuel_load": _sample(self.perturb.fuel_load),
+        }
+
+    def _apply_perturbation(self, grid: Grid, delta: dict) -> Grid:
+        """Copie la grille et applique les perturbations."""
+        import copy
+
+        g = copy.deepcopy(grid)
+
+        for i in range(g.rows):
+            for j in range(g.cols):
+                c = g.cells[i][j]
+
+                # Vent
+                c.wind_speed_ms = max(0.0, c.wind_speed_ms * (1.0 + delta["delta_wind_speed"]))
+                c.wind_dir_deg = (c.wind_dir_deg + delta["delta_wind_dir"]) % 360.0
+
+                # Humidite
+                c.moisture.m_1h = float(np.clip(c.moisture.m_1h + delta["delta_moisture"], 0.01, 0.50))
+                c.moisture.m_10h = float(np.clip(c.moisture.m_10h + delta["delta_moisture"] * 0.8, 0.02, 0.45))
+                c.moisture.m_100h = float(np.clip(c.moisture.m_100h + delta["delta_moisture"] * 0.6, 0.03, 0.40))
+
+        return g
+
+    # ------------------------------------------------------------------
+    # Execution
+    # ------------------------------------------------------------------
+
+    def run(
+        self,
+        steps: int,
+        dt: float = 1.0,
+        ignite_at: Optional[Tuple[int, int]] = None,
+        verbose: bool = False,
+    ) -> np.ndarray:
+        """
+        Execute N simulations et retourne la carte de probabilite.
+
+        Args:
+            steps     : Nombre de pas de temps par realisation
+            dt        : Pas de temps (min)
+            ignite_at : Point d'ignition (row, col). None = utilise allumettes
+                        existantes dans base_grid.
+            verbose   : Affiche la progression
+
+        Returns:
+            np.ndarray (rows, cols) — probabilite de brulage dans [0, 1]
+        """
+        from .simulation import FireSimulation
+
+        rows, cols = self.base_grid.rows, self.base_grid.cols
+        burn_count = np.zeros((rows, cols), dtype=np.float64)
+
+        for k in range(self.n):
+            delta = self._sample_perturbation()
+            grid = self._apply_perturbation(self.base_grid, delta)
+
+            sim = FireSimulation(
+                grid,
+                rules=PropagationRules() if self.rules is None else self.rules,
+                seed=int(self.rng.integers(0, 2**31)),
+            )
+
+            if ignite_at is not None:
+                sim.ignite(*ignite_at)
+
+            sim.run(steps, dt, verbose=False, stop_if_extinct=True)
+
+            burn_count += (grid.state_array() >= 2).astype(np.float64)
+
+            if verbose and (k + 1) % max(1, self.n // 10) == 0:
+                pct = (k + 1) / self.n * 100
+                print(f"[Ensemble] {k+1:4d}/{self.n} ({pct:.0f}%)")
+
+        return burn_count / self.n
+
+    def run_with_ignitions(
+        self,
+        steps: int,
+        ignition_points: List[Tuple[int, int]],
+        dt: float = 1.0,
+        verbose: bool = False,
+    ) -> np.ndarray:
+        """
+        Execute l'ensemble avec plusieurs points d'ignition simultanes.
+        """
+        from .simulation import FireSimulation
+
+        rows, cols = self.base_grid.rows, self.base_grid.cols
+        burn_count = np.zeros((rows, cols), dtype=np.float64)
+
+        for k in range(self.n):
+            delta = self._sample_perturbation()
+            grid = self._apply_perturbation(self.base_grid, delta)
+
+            sim = FireSimulation(
+                grid,
+                rules=PropagationRules() if self.rules is None else self.rules,
+                seed=int(self.rng.integers(0, 2**31)),
+            )
+
+            for pt in ignition_points:
+                sim.ignite(*pt)
+
+            sim.run(steps, dt, verbose=False, stop_if_extinct=True)
+            burn_count += (grid.state_array() >= 2).astype(np.float64)
+
+            if verbose and (k + 1) % max(1, self.n // 10) == 0:
+                pct = (k + 1) / self.n * 100
+                print(f"[Ensemble] {k+1:4d}/{self.n} ({pct:.0f}%)")
+
+        return burn_count / self.n
+
+    # ------------------------------------------------------------------
+    # Statistiques
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def prob_summary(prob_map: np.ndarray) -> dict:
+        """Resume statistique d'une carte de probabilite."""
+        return {
+            "shape": prob_map.shape,
+            "mean_p": float(np.mean(prob_map)),
+            "median_p": float(np.median(prob_map)),
+            "p90": float(np.percentile(prob_map, 90)),
+            "p10": float(np.percentile(prob_map, 10)),
+            "high_risk_pct": float(np.mean(prob_map > 0.5) * 100),
+            "burned_area_pct": float(np.mean(prob_map > 0.05) * 100),
+        }

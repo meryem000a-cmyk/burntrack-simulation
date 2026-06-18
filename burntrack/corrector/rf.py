@@ -7,20 +7,35 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 
 from burntrack.corrector.base import BaseCorrector
-from burntrack.corrector.mlp import (
-    build_ia_vector,
-    encode_fuel_model,
-    REQUIRED_FEATURES,
-)
+from burntrack.corrector.features import CorrectorFeatureExtractor, ALL_CONTINUOUS_FEATURES
+
+FUEL_MODEL_ENCODING = {
+    'GR1': 0, 'GR2': 1, 'GR3': 2, 'GR4': 3, 'GR5': 4,
+    'GR6': 5, 'GR7': 6, 'GR8': 7, 'GR9': 8,
+    'GS1': 9, 'GS2': 10, 'GS3': 11, 'GS4': 12,
+    'SH1': 13, 'SH2': 14, 'SH3': 15, 'SH4': 16, 'SH5': 17,
+    'SH6': 18, 'SH7': 19, 'SH8': 20, 'SH9': 21,
+    'AF_STEPPE': 22, 'AF_STEPPE_DENSE': 23, 'AF_ARGAN': 24,
+    'AF_CHENE_LIEGE': 25, 'AF_CEDRE': 26, 'AF_MAQUIS': 27,
+    'AF_CEREALES': 28, 'AF_PALMIER': 29, 'AF_TAMARIX': 30, 'AF_JUJUBIER': 31,
+    'AF_SAHEL_GRASS': 32, 'AF_SAHEL_WOODED': 33,
+    'AF_SUDAN_GRASS': 34, 'AF_SUDAN_WOODED': 35,
+    'AF_MIOMBO': 36, 'AF_MIOMBO_DENSE': 37, 'AF_MOPANE': 38,
+    'AF_ACACIA_SAVANNA': 39, 'AF_GRASSLAND_FERTILE': 40,
+    'AF_FYNBOS': 41, 'AF_FYNBOS_YOUNG': 42,
+    'AF_BUSHVELD': 43, 'AF_BAOBAB': 44, 'AF_FOREST_DRY': 45,
+    'AF_AFROMONTANE': 46, 'AF_MANGROVE': 47,
+    'AF_RANGE_DEGRADED': 48, 'AF_RANGE_INTACT': 49,
+}
+
+
+def encode_fuel_model(code: str) -> int:
+    return FUEL_MODEL_ENCODING.get(code, 0)
 
 
 class RandomForestCorrector(BaseCorrector):
     """
     Correcteur Random Forest pour delta_ros.
-
-    Charge un modèle entraîné + scaler via joblib.
-    Construit le vecteur de features avec build_ia_vector,
-    scale, prédit delta_ros.
     """
 
     def __init__(
@@ -30,36 +45,28 @@ class RandomForestCorrector(BaseCorrector):
     ):
         self.model: Optional[RandomForestRegressor] = None
         self.scaler: Optional[StandardScaler] = None
-
-        self.continuous_features = [f for f in REQUIRED_FEATURES if f != 'fuel_model_code']
+        self.feature_extractor = CorrectorFeatureExtractor()
 
         if model_path is not None:
             self.load(model_path, scaler_path)
 
     def load(self, model_path: str, scaler_path: Optional[str] = None):
-        """Charge modèle et scaler depuis des fichiers joblib."""
         self.model = joblib.load(model_path)
         if scaler_path is not None:
             self.scaler = joblib.load(scaler_path)
         return self
 
     def _build_features(self, features: Dict) -> np.ndarray:
-        """Construit le vecteur complet [n_continuous + 1] (scaled + fuel_idx)."""
-        build_kwargs = {f: features[f] for f in REQUIRED_FEATURES if f != 'fuel_model_code'}
-        build_kwargs['fuel_model_code'] = features['fuel_model_code']
-        x_continuous, fuel_idx = build_ia_vector(**build_kwargs)
+        extracted = self.feature_extractor.extract_row(features)
+        feature_names = self.feature_extractor.get_feature_names()
+        x = np.array([[extracted.get(name, 0.0) for name in feature_names]], dtype=np.float64)
 
-        x_continuous = x_continuous.reshape(1, -1)
         if self.scaler is not None:
-            x_continuous = self.scaler.transform(x_continuous)
-
-        fuel_idx_arr = np.array([[fuel_idx]], dtype=np.float32)
-        X = np.hstack([x_continuous, fuel_idx_arr])
-        return X
+            x = self.scaler.transform(x)
+        return x
 
     def predict(self, features: Dict) -> Dict[str, float]:
-        """Retourne {'delta_ros': float, 'ros_corrected': float}."""
-        ros_rothermel = float(features['ros_rothermel'])
+        ros_rothermel = float(features.get('ros_rothermel', features.get('ros', 0.0)))
         X = self._build_features(features)
         delta_ros = float(self.model.predict(X)[0])
         return {
@@ -68,11 +75,7 @@ class RandomForestCorrector(BaseCorrector):
         }
 
     def predict_with_uncertainty(self, features: Dict) -> Dict:
-        """
-        Retourne delta_ros, ros_corrected et uncertainty
-        via l'écart-type des arbres individuels.
-        """
-        ros_rothermel = float(features['ros_rothermel'])
+        ros_rothermel = float(features.get('ros_rothermel', features.get('ros', 0.0)))
         X = self._build_features(features)
 
         tree_preds = np.array([tree.predict(X) for tree in self.model.estimators_])

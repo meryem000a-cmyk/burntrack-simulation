@@ -28,10 +28,14 @@ class PipelineRunner:
         self.corrector = None
         self.scaler = None
         self.corrector_type = None
+        self.feature_extractor = None
         self._load_corrector()
 
     def _load_corrector(self):
         import joblib
+        from burntrack.corrector.features import CorrectorFeatureExtractor
+
+        self.feature_extractor = CorrectorFeatureExtractor()
 
         for model_file in ["rf_corrector.joblib", "xgb_corrector.joblib"]:
             model_path = os.path.join(self.model_dir, model_file)
@@ -119,24 +123,31 @@ class PipelineRunner:
 
         try:
             ros_rothermel = rothermel_out.get("ros_m_min", 0.0)
-            x_cont = np.array([[features.get(k, 0.0) for k in (
-                "temp_air", "rh", "wind_speed", "vpd", "slope_deg", "slope_pct",
-                "w_total", "w_dead", "w_live", "delta", "sigma", "mx", "h_dead",
-                "phi_w", "phi_s", "phi_eff", "beta", "beta_opt", "gamma",
-                "eta_M", "eta_S", "I_R", "xi", "tau", "ndvi", "ndwi", "lst", "dfmc"
-            )]], dtype=np.float32)
+
+            extracted = self.feature_extractor.extract_row(features)
+            feature_names = self.feature_extractor.get_feature_names()
+            n_expected = None
+            if self.scaler is not None and hasattr(self.scaler, 'n_features_in_'):
+                n_expected = self.scaler.n_features_in_
+            elif hasattr(self.corrector, 'n_features_in_'):
+                n_expected = self.corrector.n_features_in_
+            if n_expected is not None and n_expected < len(feature_names):
+                feature_names = feature_names[:n_expected]
+            x_cont = np.array([[extracted.get(name, 0.0) for name in feature_names]], dtype=np.float64)
 
             if self.corrector_type in ("rf", "xgb"):
                 x_scaled = self.scaler.transform(x_cont)
-                pred_log = self.corrector.predict(x_scaled)[0]
-                ros_corrected = max(0.0, float(np.exp(pred_log) - 0.1))
-                delta_ros = ros_corrected - ros_rothermel
+                delta_ros = float(self.corrector.predict(x_scaled)[0])
+                ros_corrected = max(0.0, ros_rothermel + delta_ros)
                 uncertainty_std = 0.0
             else:
                 import torch
                 x_scaled = self.scaler.transform(x_cont)
                 x_t = torch.tensor(x_scaled, dtype=torch.float32)
-                fuel_t = torch.tensor([features.get("fuel_idx", 0)], dtype=torch.long)
+                fuel_code = features.get("fuel_model_code", "")
+                from burntrack.corrector.mlp import encode_fuel_model
+                fuel_idx = encode_fuel_model(fuel_code)
+                fuel_t = torch.tensor([fuel_idx], dtype=torch.long)
                 with torch.no_grad():
                     out = self.corrector(x_t, fuel_t).numpy()[0]
                 delta_ros = float(out[0])
@@ -178,36 +189,45 @@ class PipelineRunner:
 
         rothermel_out = self._compute_rothermel(fuel_model, env, conditions)
 
+        temp_air = robot_data.get("temp_air", 25.0) if robot_data else 25.0
+        rh = robot_data.get("rh", 40.0) if robot_data else 40.0
+        wind_speed = robot_data.get("wind_speed", 3.0) if robot_data else 3.0
+        slope_pct = conditions["slope_pct"]
+
+        from burntrack.corrector.features import compute_vpd, compute_dfmc
+        vpd = compute_vpd(temp_air, rh)
+        dfmc = compute_dfmc(temp_air, vpd)
+
         features = {
-            "temp_air": robot_data.get("temp_air", 25.0) if robot_data else 25.0,
-            "rh": robot_data.get("rh", 40.0) if robot_data else 40.0,
-            "wind_speed": robot_data.get("wind_speed", 3.0) if robot_data else 3.0,
-            "vpd": 1.0,
-            "slope_deg": robot_data.get("slope_deg", 0.0) if robot_data else 0.0,
-            "slope_pct": conditions["slope_pct"],
-            "w_total": 0.5,
-            "w_dead": 0.3,
-            "w_live": 0.2,
-            "delta": 0.3,
-            "sigma": 1500.0,
-            "mx": 20.0,
-            "h_dead": 18622.0,
+            "ros_rothermel": rothermel_out.get("ros_m_min", 0.0),
+            "ros": rothermel_out.get("ros_m_min", 0.0),
             "phi_w": rothermel_out.get("phi_w", 0.0),
             "phi_s": rothermel_out.get("phi_s", 0.0),
             "phi_eff": rothermel_out.get("phi_eff", 0.0),
-            "beta": 0.001,
-            "beta_opt": 0.001,
-            "gamma": 1.0,
-            "eta_M": 1.0,
-            "eta_S": 1.0,
-            "I_R": rothermel_out.get("fireline_intensity_kW_m", 0.0),
-            "xi": 0.5,
-            "tau": 0.5,
-            "ndvi": 0.3,
-            "ndwi": 0.0,
-            "lst": 25.0,
-            "dfmc": 10.0,
-            "fuel_idx": 0,
+            "fireline_intensity": rothermel_out.get("fireline_intensity_kW_m", 0.0),
+            "reaction_intensity": rothermel_out.get("fireline_intensity_kW_m", 0.0),
+            "residence_time": 0.5,
+            "temp_c": temp_air,
+            "rh_percent": rh,
+            "wind_speed_ms": wind_speed,
+            "wind_speed": wind_speed,
+            "slope_pct": slope_pct,
+            "slope_deg": robot_data.get("slope_deg", 0.0) if robot_data else 0.0,
+            "aspect_deg": 0.0,
+            "angle_wind_slope": 0.0,
+            "ndvi": robot_data.get("ndvi", 0.3) if robot_data else 0.3,
+            "ndwi": robot_data.get("ndwi", -0.1) if robot_data else -0.1,
+            "lst_c": robot_data.get("lst", temp_air + 10.0) if robot_data else temp_air + 10.0,
+            "w_total_kg_m2": robot_data.get("w_total", 0.5) if robot_data else 0.5,
+            "w_dead_kg_m2": robot_data.get("w_dead", 0.3) if robot_data else 0.3,
+            "w_live_kg_m2": robot_data.get("w_live", 0.2) if robot_data else 0.2,
+            "delta_m": 0.3,
+            "sigma_m2_m3": 1500.0,
+            "mx_percent": 20.0,
+            "h_dead_kj_kg": 18622.0,
+            "fuel_model_code": fuel_model,
+            "date": date,
+            "latitude": lat,
         }
 
         ia_out = self._apply_corrector(rothermel_out, features)
