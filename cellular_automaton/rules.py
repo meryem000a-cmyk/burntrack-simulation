@@ -303,13 +303,24 @@ class PropagationRules:
 # CorrectorV3Adapter — ML correcteur de delta_ros
 # ---------------------------------------------------------------------------
 
+RF_FEATURE_NAMES = [
+    "ros_rothermel", "ros_terrain", "temp_c", "rh_percent", "wind_speed_ms",
+    "wind_10m", "vpd_kpa", "slope_deg", "slope_pct", "angle_wind_slope",
+    "w_total_kg_m2", "w_dead_kg_m2", "w_live_kg_m2", "delta_m", "sigma_m2_m3",
+    "mx_percent", "h_dead_kj_kg", "phi_w", "phi_s", "phi_eff",
+    "beta", "beta_opt", "beta_ratio", "gamma", "eta_M", "eta_S",
+    "I_R_kW_m2", "xi", "tau_min", "ndvi", "ndwi", "lst_c",
+    "dfmc_percent", "m_1h", "m_10h", "m_100h", "m_live_herb", "m_live_woody",
+]
+
+
 class CorrectorV3Adapter:
     """
     Adaptateur pour le Corrector V3 (ML).
 
     Pont entre le modele ML de correction et l'automate cellulaire.
-    Utilise CorrectorFeatureExtractor pour extraire les memes features
-    que le pipeline (run_pipeline.py) — coherence garantie.
+    Construit les 38 features brutes du CSV pour le RF — coherence
+    avec run_pipeline.py.
 
     Usage:
         rules = PropagationRules()
@@ -322,15 +333,15 @@ class CorrectorV3Adapter:
         self.rules = rules
         self.model = None
         self.scaler = None
-        self.feature_extractor = None
+        self.feature_names = list(RF_FEATURE_NAMES)
         self.env_context = {}
 
     def set_model(self, model, scaler=None, **env_context):
         self.model = model
         self.scaler = scaler
         self.env_context = env_context
-        from burntrack.corrector.features import CorrectorFeatureExtractor
-        self.feature_extractor = CorrectorFeatureExtractor()
+        if scaler is not None and hasattr(scaler, 'n_features_in_'):
+            self.feature_names = RF_FEATURE_NAMES[:scaler.n_features_in_]
 
     def _build_cell_features(self, cell: Cell, output=None) -> dict:
         from burntrack.corrector.features import compute_vpd, compute_dfmc
@@ -340,41 +351,32 @@ class CorrectorV3Adapter:
         vpd = compute_vpd(temp_c, rh_percent)
         dfmc = getattr(cell, 'dfmc', compute_dfmc(temp_c, vpd))
 
-        row = {
+        wind_prop_dir = (getattr(cell, 'wind_dir_deg', 270.0) + 180.0) % 360.0
+        aspect = getattr(cell, 'aspect_deg', 0.0)
+        angle_wind_slope = abs((wind_prop_dir - aspect + 360.0) % 360.0)
+        if angle_wind_slope > 180.0:
+            angle_wind_slope = 360.0 - angle_wind_slope
+
+        slope_pct = cell.slope_pct
+        slope_deg = getattr(cell, 'slope_deg', 0.0)
+        if slope_deg == 0.0 and slope_pct > 0.0:
+            slope_deg = np.degrees(np.arctan(slope_pct / 100.0))
+
+        beta = getattr(cell, '_beta', 0.001)
+        beta_opt = getattr(cell, '_beta_opt', 0.001)
+        beta_ratio = beta / max(beta_opt, 1e-6)
+
+        return {
             "ros_rothermel": output.ros if output else getattr(cell, '_base_ros', 0.0),
-            "ros": output.ros if output else getattr(cell, '_base_ros', 0.0),
-            "phi_w": output.phi_w if output else getattr(cell, '_phi_w', 0.0),
-            "phi_s": output.phi_s if output else getattr(cell, '_phi_s', 0.0),
-            "phi_eff": output.phi_eff if output else getattr(cell, '_phi_eff', 0.0),
-            "beta": output.beta if output else 0.0,
-            "beta_opt": output.beta_opt if output else 0.0,
-            "gamma": output.gamma if output else 0.0,
-            "eta_M": output.eta_M if output else 0.0,
-            "eta_S": output.eta_S if output else 0.0,
-            "I_R_kW_m2": output.reaction_intensity if output else 0.0,
-            "reaction_intensity": output.reaction_intensity if output else 0.0,
-            "xi": output.xi if output else 0.0,
-            "tau_min": output.residence_time if output else 0.5,
-            "residence_time": output.residence_time if output else 0.5,
-            "fireline_intensity": output.fireline_intensity if output else 0.0,
-            "wind_speed_ms": cell.wind_speed_ms,
-            "wind_speed": cell.wind_speed_ms,
-            "slope_pct": cell.slope_pct,
-            "slope_deg": getattr(cell, 'slope_deg', 0.0),
-            "aspect_deg": cell.aspect_deg,
-            "angle_wind_slope": getattr(cell, '_angle_wind_slope', 0.0),
-            "m_1h": cell.moisture.m_1h,
-            "m_10h": cell.moisture.m_10h,
-            "m_100h": cell.moisture.m_100h,
-            "m_live_herb": cell.moisture.m_live_herb,
-            "m_live_woody": cell.moisture.m_live_woody,
+            "ros_terrain": output.ros if output else getattr(cell, '_base_ros', 0.0),
             "temp_c": temp_c,
             "rh_percent": rh_percent,
+            "wind_speed_ms": cell.wind_speed_ms,
+            "wind_10m": cell.wind_speed_ms * 2.5,
             "vpd_kpa": vpd,
-            "dfmc_percent": dfmc,
-            "ndvi": getattr(cell, 'ndvi', 0.3),
-            "ndwi": getattr(cell, 'ndwi', -0.1),
-            "lst_c": getattr(cell, 'lst', temp_c + 10.0),
+            "slope_deg": slope_deg,
+            "slope_pct": slope_pct,
+            "angle_wind_slope": angle_wind_slope,
             "w_total_kg_m2": getattr(cell, 'w_total_kg_m2', 0.5),
             "w_dead_kg_m2": getattr(cell, 'w_dead_kg_m2', 0.3),
             "w_live_kg_m2": getattr(cell, 'w_live_kg_m2', 0.2),
@@ -382,48 +384,50 @@ class CorrectorV3Adapter:
             "sigma_m2_m3": getattr(cell, 'sigma', 1500.0),
             "mx_percent": getattr(cell, 'mx', 20.0),
             "h_dead_kj_kg": getattr(cell, 'h_dead', 18622.0),
-            "fuel_model_code": cell.fuel_code,
-            "date": getattr(cell, 'date', ''),
-            "latitude": getattr(cell, 'latitude', 0.0),
+            "phi_w": output.phi_w if output else getattr(cell, '_phi_w', 0.0),
+            "phi_s": output.phi_s if output else getattr(cell, '_phi_s', 0.0),
+            "phi_eff": output.phi_eff if output else getattr(cell, '_phi_eff', 0.0),
+            "beta": beta,
+            "beta_opt": beta_opt,
+            "beta_ratio": beta_ratio,
+            "gamma": output.gamma if output else getattr(cell, '_gamma', 0.0),
+            "eta_M": output.eta_M if output else getattr(cell, '_eta_M', 0.0),
+            "eta_S": output.eta_S if output else getattr(cell, '_eta_S', 0.0),
+            "I_R_kW_m2": output.reaction_intensity if output else getattr(cell, '_I_R', 0.0),
+            "xi": output.xi if output else getattr(cell, '_xi', 0.0),
+            "tau_min": output.residence_time if output else getattr(cell, '_tau', 0.0),
+            "ndvi": getattr(cell, 'ndvi', 0.3),
+            "ndwi": getattr(cell, 'ndwi', -0.1),
+            "lst_c": getattr(cell, 'lst', temp_c + 10.0),
+            "dfmc_percent": dfmc,
+            "m_1h": cell.moisture.m_1h,
+            "m_10h": cell.moisture.m_10h,
+            "m_100h": cell.moisture.m_100h,
+            "m_live_herb": cell.moisture.m_live_herb,
+            "m_live_woody": cell.moisture.m_live_woody,
         }
-        row.update(self.env_context)
-        return row
 
     def predict_delta_ros(self, cell: Cell, output: RothermelOutput) -> float:
-        if self.model is None or self.feature_extractor is None:
+        if self.model is None:
             return 0.0
         try:
             features = self._build_cell_features(cell, output)
             x = self._features_to_array(features)
-            if hasattr(self.model, 'predict'):
-                preds = self.model.predict(x)
-                if hasattr(preds[0], '__len__'):
-                    return float(preds[0][0])
-                return float(preds[0])
-            return 0.0
+            preds = self.model.predict(x)
+            if hasattr(preds[0], '__len__'):
+                return float(preds[0][0])
+            return float(preds[0])
         except Exception:
             return 0.0
 
     def _features_to_array(self, features: dict) -> np.ndarray:
-        extracted = self.feature_extractor.extract_row(features)
-        feature_names = self.feature_extractor.get_feature_names()
-        n_expected = self._get_expected_n_features()
-        if n_expected is not None and n_expected < len(feature_names):
-            feature_names = feature_names[:n_expected]
-        x = np.array([[extracted.get(name, 0.0) for name in feature_names]], dtype=np.float64)
+        x = np.array([[features.get(name, 0.0) for name in self.feature_names]], dtype=np.float64)
         if self.scaler is not None:
             x = self.scaler.transform(x)
         return x
 
-    def _get_expected_n_features(self):
-        if self.scaler is not None and hasattr(self.scaler, 'n_features_in_'):
-            return self.scaler.n_features_in_
-        if hasattr(self.model, 'n_features_in_'):
-            return self.model.n_features_in_
-        return None
-
     def apply_to_grid(self, grid: Grid):
-        if self.model is None or self.feature_extractor is None:
+        if self.model is None:
             return
 
         all_features = []
@@ -439,12 +443,7 @@ class CorrectorV3Adapter:
         if not all_features:
             return
 
-        extracted_list = [self.feature_extractor.extract_row(f) for f in all_features]
-        feature_names = self.feature_extractor.get_feature_names()
-        n_expected = self._get_expected_n_features()
-        if n_expected is not None and n_expected < len(feature_names):
-            feature_names = feature_names[:n_expected]
-        x = np.array([[f.get(name, 0.0) for name in feature_names] for f in extracted_list], dtype=np.float64)
+        x = np.array([[f.get(name, 0.0) for name in self.feature_names] for f in all_features], dtype=np.float64)
 
         if self.scaler is not None:
             x = self.scaler.transform(x)

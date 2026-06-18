@@ -23,19 +23,25 @@ sys.path.insert(0, PROJECT_ROOT)
 
 
 class PipelineRunner:
+    RF_FEATURE_NAMES = [
+        "ros_rothermel", "ros_terrain", "temp_c", "rh_percent", "wind_speed_ms",
+        "wind_10m", "vpd_kpa", "slope_deg", "slope_pct", "angle_wind_slope",
+        "w_total_kg_m2", "w_dead_kg_m2", "w_live_kg_m2", "delta_m", "sigma_m2_m3",
+        "mx_percent", "h_dead_kj_kg", "phi_w", "phi_s", "phi_eff",
+        "beta", "beta_opt", "beta_ratio", "gamma", "eta_M", "eta_S",
+        "I_R_kW_m2", "xi", "tau_min", "ndvi", "ndwi", "lst_c",
+        "dfmc_percent", "m_1h", "m_10h", "m_100h", "m_live_herb", "m_live_woody",
+    ]
+
     def __init__(self, model_dir: str = "models"):
         self.model_dir = model_dir
         self.corrector = None
         self.scaler = None
         self.corrector_type = None
-        self.feature_extractor = None
         self._load_corrector()
 
     def _load_corrector(self):
         import joblib
-        from burntrack.corrector.features import CorrectorFeatureExtractor
-
-        self.feature_extractor = CorrectorFeatureExtractor()
 
         for model_file in ["rf_corrector.joblib", "xgb_corrector.joblib"]:
             model_path = os.path.join(self.model_dir, model_file)
@@ -44,6 +50,7 @@ class PipelineRunner:
                 self.corrector = joblib.load(model_path)
                 self.scaler = joblib.load(scaler_path)
                 self.corrector_type = "rf" if "rf" in model_file else "xgb"
+                self.feature_names = self.RF_FEATURE_NAMES[:self.scaler.n_features_in_]
                 return
 
         try:
@@ -55,6 +62,7 @@ class PipelineRunner:
             if os.path.exists(model_path) and os.path.exists(scaler_path):
                 self.scaler = joblib.load(scaler_path)
                 self.corrector_type = "mlp"
+                self.feature_names = self.RF_FEATURE_NAMES
         except ImportError:
             pass
 
@@ -123,26 +131,16 @@ class PipelineRunner:
 
         try:
             ros_rothermel = rothermel_out.get("ros_m_min", 0.0)
-
-            extracted = self.feature_extractor.extract_row(features)
-            feature_names = self.feature_extractor.get_feature_names()
-            n_expected = None
-            if self.scaler is not None and hasattr(self.scaler, 'n_features_in_'):
-                n_expected = self.scaler.n_features_in_
-            elif hasattr(self.corrector, 'n_features_in_'):
-                n_expected = self.corrector.n_features_in_
-            if n_expected is not None and n_expected < len(feature_names):
-                feature_names = feature_names[:n_expected]
-            x_cont = np.array([[extracted.get(name, 0.0) for name in feature_names]], dtype=np.float64)
+            x = np.array([[features.get(name, 0.0) for name in self.feature_names]], dtype=np.float64)
 
             if self.corrector_type in ("rf", "xgb"):
-                x_scaled = self.scaler.transform(x_cont)
+                x_scaled = self.scaler.transform(x)
                 delta_ros = float(self.corrector.predict(x_scaled)[0])
                 ros_corrected = max(0.0, ros_rothermel + delta_ros)
                 uncertainty_std = 0.0
             else:
                 import torch
-                x_scaled = self.scaler.transform(x_cont)
+                x_scaled = self.scaler.transform(x)
                 x_t = torch.tensor(x_scaled, dtype=torch.float32)
                 fuel_code = features.get("fuel_model_code", "")
                 from burntrack.corrector.mlp import encode_fuel_model
@@ -200,24 +198,15 @@ class PipelineRunner:
 
         features = {
             "ros_rothermel": rothermel_out.get("ros_m_min", 0.0),
-            "ros": rothermel_out.get("ros_m_min", 0.0),
-            "phi_w": rothermel_out.get("phi_w", 0.0),
-            "phi_s": rothermel_out.get("phi_s", 0.0),
-            "phi_eff": rothermel_out.get("phi_eff", 0.0),
-            "fireline_intensity": rothermel_out.get("fireline_intensity_kW_m", 0.0),
-            "reaction_intensity": rothermel_out.get("fireline_intensity_kW_m", 0.0),
-            "residence_time": 0.5,
+            "ros_terrain": rothermel_out.get("ros_m_min", 0.0),
             "temp_c": temp_air,
             "rh_percent": rh,
             "wind_speed_ms": wind_speed,
-            "wind_speed": wind_speed,
-            "slope_pct": slope_pct,
+            "wind_10m": wind_speed * 2.5,
+            "vpd_kpa": vpd,
             "slope_deg": robot_data.get("slope_deg", 0.0) if robot_data else 0.0,
-            "aspect_deg": 0.0,
+            "slope_pct": slope_pct,
             "angle_wind_slope": 0.0,
-            "ndvi": robot_data.get("ndvi", 0.3) if robot_data else 0.3,
-            "ndwi": robot_data.get("ndwi", -0.1) if robot_data else -0.1,
-            "lst_c": robot_data.get("lst", temp_air + 10.0) if robot_data else temp_air + 10.0,
             "w_total_kg_m2": robot_data.get("w_total", 0.5) if robot_data else 0.5,
             "w_dead_kg_m2": robot_data.get("w_dead", 0.3) if robot_data else 0.3,
             "w_live_kg_m2": robot_data.get("w_live", 0.2) if robot_data else 0.2,
@@ -225,9 +214,27 @@ class PipelineRunner:
             "sigma_m2_m3": 1500.0,
             "mx_percent": 20.0,
             "h_dead_kj_kg": 18622.0,
-            "fuel_model_code": fuel_model,
-            "date": date,
-            "latitude": lat,
+            "phi_w": rothermel_out.get("phi_w", 0.0),
+            "phi_s": rothermel_out.get("phi_s", 0.0),
+            "phi_eff": rothermel_out.get("phi_eff", 0.0),
+            "beta": 0.001,
+            "beta_opt": 0.001,
+            "beta_ratio": 1.0,
+            "gamma": rothermel_out.get("gamma", 0.0),
+            "eta_M": rothermel_out.get("eta_M", 0.0),
+            "eta_S": rothermel_out.get("eta_S", 0.0),
+            "I_R_kW_m2": rothermel_out.get("fireline_intensity_kW_m", 0.0),
+            "xi": rothermel_out.get("xi", 0.0),
+            "tau_min": rothermel_out.get("tau_min", 0.0),
+            "ndvi": robot_data.get("ndvi", 0.3) if robot_data else 0.3,
+            "ndwi": robot_data.get("ndwi", -0.1) if robot_data else -0.1,
+            "lst_c": robot_data.get("lst", temp_air + 10.0) if robot_data else temp_air + 10.0,
+            "dfmc_percent": dfmc,
+            "m_1h": env["m_1h"],
+            "m_10h": env["m_10h"],
+            "m_100h": env["m_100h"],
+            "m_live_herb": env["m_live_herb"],
+            "m_live_woody": env["m_live_woody"],
         }
 
         ia_out = self._apply_corrector(rothermel_out, features)
