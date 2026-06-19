@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BurnTrack — Visualisation Automate Cellulaire</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0e14; --bg2: #131922; --bg3: #1c2333; --border: #2a3142;
+    --text: #e0e6f0; --text2: #7a8599; --accent: #4da6ff; --accent2: #3fb950;
+    --fire: #ff4d3a; --amber: #e6a817; --purple: #b07aff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Consolas', 'Courier New', monospace; background: var(--bg); color: var(--text); overflow: hidden; height: 100vh; }
+
+  .dashboard { display: grid; grid-template-columns: 1fr 320px; grid-template-rows: 50px 1fr 200px; height: 100vh; gap: 1px; background: var(--border); }
+  .header { grid-column: 1/-1; background: var(--bg2); display: flex; align-items: center; padding: 0 16px; gap: 12px; font-size: 13px; }
+  .header h1 { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: 1px; text-transform: uppercase; }
+  .header .stats-bar { display: flex; gap: 14px; margin-left: auto; }
+  .header .stat { display: flex; align-items: center; gap: 4px; }
+  .header .stat .label { color: var(--text2); font-size: 11px; text-transform: uppercase; }
+  .header .stat .value { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .header .stat .value.fire { color: var(--fire); }
+  .header .stat .value.amber { color: var(--amber); }
+  .header .stat .value.green { color: var(--accent2); }
+
+  .main-area { background: var(--bg); position: relative; overflow: hidden; display: flex; flex-direction: column; }
+  .toolbar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 6px 10px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+  .toolbar button { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; font-family: inherit; transition: all 0.12s; }
+  .toolbar button:hover { background: var(--border); border-color: var(--accent); }
+  .toolbar button.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
+  .toolbar button.danger { border-color: var(--fire); color: var(--fire); }
+  .toolbar button.danger:hover { background: var(--fire); color: #fff; }
+  .toolbar .sep { width: 1px; height: 20px; background: var(--border); }
+  .toolbar label { font-size: 11px; color: var(--text2); display: flex; align-items: center; gap: 3px; }
+  .toolbar input[type=range] { width: 70px; accent-color: var(--accent); }
+  .toolbar select { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 3px 6px; border-radius: 3px; font-size: 11px; font-family: inherit; }
+
+  .canvas-wrap { flex: 1; position: relative; cursor: crosshair; overflow: hidden; background: #080c12; }
+  .canvas-wrap canvas { position: absolute; top: 0; left: 0; }
+  #gridCanvas { z-index: 1; }
+  #overlayCanvas { z-index: 2; pointer-events: none; }
+
+  .right-panel { background: var(--bg2); border-left: 1px solid var(--border); overflow-y: auto; font-size: 12px; }
+  .right-panel::-webkit-scrollbar { width: 4px; }
+  .right-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .panel-section { padding: 10px; border-bottom: 1px solid var(--border); }
+  .panel-section h3 { font-size: 10px; color: var(--accent); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+  .panel-section .row { display: flex; justify-content: space-between; padding: 2px 0; }
+  .panel-section .row .k { color: var(--text2); }
+  .panel-section .row .v { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+
+  .bottom-panel { grid-column: 1/-1; background: var(--bg2); display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); }
+  .chart-cell { background: var(--bg2); padding: 6px; position: relative; }
+  .chart-cell canvas { width: 100% !important; height: 100% !important; }
+
+  .legend { display: flex; gap: 10px; padding: 4px 10px; background: var(--bg3); border-top: 1px solid var(--border); font-size: 10px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 3px; }
+  .legend-swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(255,255,255,0.08); }
+
+  .tooltip { position: absolute; background: rgba(19,25,34,0.96); border: 1px solid var(--accent); border-radius: 4px; padding: 6px 10px; font-size: 11px; pointer-events: none; z-index: 100; max-width: 280px; box-shadow: 0 4px 16px rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
+  .tooltip .tt-title { font-weight: 700; color: var(--accent); margin-bottom: 3px; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+  .tooltip .tt-row { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; }
+  .tooltip .tt-k { color: var(--text2); }
+  .tooltip .tt-v { font-weight: 600; }
+
+  .connection-badge { padding: 3px 8px; border-radius: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+  .connection-badge.connected { background: rgba(63,185,80,0.15); color: var(--accent2); }
+  .connection-badge.disconnected { background: rgba(255,77,58,0.15); color: var(--fire); }
+
+  .overlay-selector { display: flex; gap: 3px; flex-wrap: wrap; }
+  .overlay-btn { padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border); background: var(--bg3); color: var(--text2); font-size: 10px; cursor: pointer; font-family: inherit; }
+  .overlay-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
+
+  .param-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .param-panel label { font-size: 10px; color: var(--text2); }
+  .param-panel input, .param-panel select { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 3px 5px; border-radius: 3px; font-size: 11px; font-family: inherit; width: 100%; }
+
+  @keyframes fireGlow { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.3); } }
+  .fire-cell { animation: fireGlow 0.6s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<div class="dashboard">
+  <div class="header">
+    <h1>BurnTrack</h1>
+    <span id="connectionBadge" class="connection-badge disconnected">OFFLINE</span>
+    <div class="stats-bar">
+      <div class="stat"><span class="label">T=</span><span class="value" id="hdrTime">0.0 min</span></div>
+      <div class="stat"><span class="label">Step</span><span class="value" id="hdrStep">0</span></div>
+      <div class="stat"><span class="label">Fire</span><span class="value fire" id="hdrBurning">0</span></div>
+      <div class="stat"><span class="label">Burned</span><span class="value amber" id="hdrBurned">0%</span></div>
+      <div class="stat"><span class="label">ROS</span><span class="value green" id="hdrRos">0 m/min</span></div>
+      <div class="stat"><span class="label">Intensity</span><span class="value" id="hdrIntensity">0 kW/m</span></div>
+    </div>
+  </div>
+
+  <div class="main-area">
+    <div class="toolbar">
+      <button id="btnPlay" onclick="togglePlay()">PLAY</button>
+      <button onclick="doStep()">STEP</button>
+      <button class="danger" onclick="doReset()">RESET</button>
+      <div class="sep"></div>
+      <label>Speed <input type="range" id="speedSlider" min="0.25" max="5" step="0.25" value="1" oninput="setSpeed(this.value)"><span id="speedLabel">1.0x</span></label>
+      <label>dt <input type="range" id="dtSlider" min="0.5" max="5" step="0.5" value="1" oninput="setDt(this.value)"><span id="dtLabel">1 min</span></label>
+      <div class="sep"></div>
+      <label>View:</label>
+      <div class="overlay-selector">
+        <button class="overlay-btn active" onclick="setOverlay('state')">State</button>
+        <button class="overlay-btn" onclick="setOverlay('ros')">ROS</button>
+        <button class="overlay-btn" onclick="setOverlay('intensity')">Intensity</button>
+        <button class="overlay-btn" onclick="setOverlay('flame')">Flame</button>
+        <button class="overlay-btn" onclick="setOverlay('burn_prob')">P_burn</button>
+        <button class="overlay-btn" onclick="setOverlay('slope')">Slope</button>
+        <button class="overlay-btn" onclick="setOverlay('wind_speed')">Wind</button>
+        <button class="overlay-btn" onclick="setOverlay('moisture')">Moisture</button>
+        <button class="overlay-btn" onclick="setOverlay('elevation')">Elev</button>
+      </div>
+      <div class="sep"></div>
+      <label>Risk:</label>
+      <div class="overlay-selector">
+        <button class="overlay-btn risk-btn" onclick="setOverlay('combined_risk')" style="border-color:#ff6b35;">Combined</button>
+        <button class="overlay-btn risk-btn" onclick="setOverlay('fire_risk')" style="border-color:#ff4d3a;">Fire</button>
+        <button class="overlay-btn risk-btn" onclick="setOverlay('terrain_risk')" style="border-color:#8b6914;">Terrain</button>
+        <button class="overlay-btn risk-btn" onclick="setOverlay('fuel_risk')" style="border-color:#2d8b2d;">Fuel</button>
+        <button class="overlay-btn risk-btn" onclick="setOverlay('wind_risk')" style="border-color:#4da6ff;">Wind</button>
+        <button class="overlay-btn risk-btn" onclick="setOverlay('moisture_risk')" style="border-color:#b07aff;">Moisture</button>
+      </div>
+      <div class="sep"></div>
+      <label><input type="checkbox" id="chkHex" checked onchange="toggleHex()"> Hex</label>
+      <label><input type="checkbox" id="chkArrows" checked onchange="renderGrid()"> Arrows</label>
+      <label><input type="checkbox" id="chkContours" checked onchange="renderGrid()"> Contours</label>
+      <label><input type="checkbox" id="chkNumbers" checked onchange="renderGrid()"> Numbers</label>
+    </div>
+    <div class="canvas-wrap" id="canvasWrap">
+      <canvas id="gridCanvas"></canvas>
+      <canvas id="overlayCanvas"></canvas>
+      <div id="tooltip" class="tooltip" style="display:none;"></div>
+    </div>
+    <div class="legend" id="legend">
+      <div class="legend-item"><div class="legend-swatch" style="background:#2d5a27;"></div>Unburned</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#1a8c3c;"></div>Active Fire</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#5c3a1e;"></div>Burned</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#1a3a6e;"></div>Firebreak</div>
+      <div class="legend-item"><div class="legend-swatch" style="border:1px dashed #555;"></div>Contour</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:none;border:1px solid #4a9;">&#x2192;</div>Spread Vector</div>
+    </div>
+  </div>
+
+  <div class="right-panel">
+    <div class="panel-section">
+      <h3>Simulation Config</h3>
+      <div class="param-panel">
+        <label>Region
+          <select id="selRegion" onchange="loadRealData()">
+            <option value="kruger">Kruger (480 pts)</option>
+            <option value="eastern_cape">Eastern Cape (320)</option>
+            <option value="zambia_miombo">Zambia Miombo (200)</option>
+            <option value="fynbos">Fynbos (160)</option>
+            <option value="burkina_faso">Burkina Faso (160)</option>
+            <option value="madagascar">Madagascar (120)</option>
+            <option value="uniform">Uniform Grid</option>
+          </select>
+        </label>
+        <label>Grid <input type="number" id="cfgRows" value="40" min="10" max="100"></label>
+        <label>Cell (m) <input type="number" id="cfgCellSize" value="10" min="5" max="100"></label>
+        <label>Fuel
+          <select id="cfgFuel">
+            <option value="AF_MIOMBO">AF_MIOMBO</option>
+            <option value="AF_ACACIA_SAVANNA">AF_ACACIA_SAVANNA</option>
+            <option value="AF_FYNBOS">AF_FYNBOS</option>
+            <option value="AF_STEPPE">AF_STEPPE</option>
+            <option value="GR4">GR4</option>
+            <option value="SH5">SH5</option>
+          </select>
+        </label>
+        <label>Wind (m/s) <input type="number" id="cfgWind" value="5" min="0" max="30" step="0.5"></label>
+        <label>Wind Dir <input type="number" id="cfgWindDir" value="270" min="0" max="360" step="15"></label>
+        <label>Slope % <input type="number" id="cfgSlope" value="0" min="0" max="80" step="1"></label>
+        <label>Moisture <input type="number" id="cfgMoisture" value="0.06" min="0.01" max="0.5" step="0.01"></label>
+      </div>
+      <div style="margin-top:6px;">
+        <button onclick="loadRealData()" style="width:100%;padding:5px;background:var(--accent);color:#000;border:none;border-radius:3px;cursor:pointer;font-weight:700;font-family:inherit;">LOAD REAL DATA</button>
+        <button onclick="loadUniformGrid()" style="width:100%;padding:5px;margin-top:4px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:3px;cursor:pointer;font-family:inherit;">UNIFORM GRID</button>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h3>Zone Info</h3>
+      <div id="zoneInfo">
+        <div class="row"><span class="k">Region:</span><span class="v" id="infoRegion">-</span></div>
+        <div class="row"><span class="k">Center:</span><span class="v" id="infoCenter">-</span></div>
+        <div class="row"><span class="k">Observations:</span><span class="v" id="infoObs">-</span></div>
+        <div class="row"><span class="k">Avg Slope:</span><span class="v" id="infoSlope">-</span></div>
+        <div class="row"><span class="k">Avg Wind:</span><span class="v" id="infoWind">-</span></div>
+        <div class="row"><span class="k">Avg Moisture:</span><span class="v" id="infoMoisture">-</span></div>
+        <div class="row"><span class="k">Fuel Models:</span><span class="v" id="infoFuels">-</span></div>
+      </div>
+    </div>
+
+    <div class="panel-section" id="cellPanel">
+      <h3>Selected Cell</h3>
+      <div id="cellInfo" style="color:var(--text2);">Click on a cell</div>
+    </div>
+
+    <div class="panel-section" id="firePropsPanel" style="display:none;">
+      <h3>Fire Properties</h3>
+      <div id="fireProps"></div>
+    </div>
+
+    <div class="panel-section" id="envPropsPanel" style="display:none;">
+      <h3>Environment</h3>
+      <div id="envProps"></div>
+    </div>
+
+    <div class="panel-section">
+      <h3>Stats</h3>
+      <div class="row"><span class="k">Peak fire:</span><span class="v" id="statPeakFire">-</span></div>
+      <div class="row"><span class="k">Total ignitions:</span><span class="v" id="statTotalIgn">-</span></div>
+      <div class="row"><span class="k">Duration:</span><span class="v" id="statDuration">-</span></div>
+      <div class="row"><span class="k">Final burned:</span><span class="v" id="statFinalBurn">-</span></div>
+    </div>
+  </div>
+
+  <div class="bottom-panel">
+    <div class="chart-cell"><canvas id="chartBurning"></canvas></div>
+    <div class="chart-cell"><canvas id="chartFraction"></canvas></div>
+    <div class="chart-cell"><canvas id="chartIgnitions"></canvas></div>
+    <div class="chart-cell"><canvas id="chartRos"></canvas></div>
+  </div>
+</div>
+
+<script>
+// ==========================================================================
+// BurnTrack — Hexagonal Fire Spread Visualization
+// ==========================================================================
+
+const WS_URL = `ws://${location.hostname}:8765`;
+let ws = null;
+let sim = { grid: [], ros_grid: [], intensity_grid: [], flame_length_grid: [], env: {}, risk: {}, time_min: 0, step: 0 };
+let playing = false;
+let currentOverlay = 'state';
+let selectedCell = null;
+let cellSize = 0, offsetX = 0, offsetY = 0;
+let useHex = true;
+let burnProbGrid = [];
+
+const gridCanvas = document.getElementById('gridCanvas');
+const overlayCanvas = document.getElementById('overlayCanvas');
+const gridCtx = gridCanvas.getContext('2d');
+const overCtx = overlayCanvas.getContext('2d');
+const wrap = document.getElementById('canvasWrap');
+
+let chartBurning, chartFraction, chartIgnitions, chartRos;
+
+// ==========================================================================
+// WebSocket
+// ==========================================================================
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    document.getElementById('connectionBadge').className = 'connection-badge connected';
+    document.getElementById('connectionBadge').textContent = 'ONLINE';
+    ws.send(JSON.stringify({ cmd: 'get_env' }));
+    ws.send(JSON.stringify({ cmd: 'get_stats' }));
+    ws.send(JSON.stringify({ cmd: 'get_real_regions' }));
+  };
+  ws.onclose = () => {
+    document.getElementById('connectionBadge').className = 'connection-badge disconnected';
+    document.getElementById('connectionBadge').textContent = 'OFFLINE';
+    setTimeout(connect, 2000);
+  };
+  ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
+}
+
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'ready':
+      if (msg.grid) {
+        document.getElementById('cfgRows').value = msg.grid.rows;
+      }
+      break;
+    case 'configured':
+      if (msg.status === 'ok') {
+        resizeCanvas();
+        if (msg.region) {
+          document.getElementById('infoRegion').textContent = msg.region;
+          document.getElementById('infoCenter').textContent = `${msg.center_lat}, ${msg.center_lon}`;
+          document.getElementById('infoObs').textContent = msg.n_observations;
+          document.getElementById('infoSlope').textContent = msg.avg_slope_pct + '%';
+          document.getElementById('infoWind').textContent = msg.avg_wind_ms + ' m/s';
+          document.getElementById('infoMoisture').textContent = (msg.avg_moisture * 100).toFixed(1) + '%';
+          document.getElementById('infoFuels').textContent = (msg.fuel_models || []).join(', ');
+        }
+      }
+      break;
+    case 'frame':
+      sim.grid = msg.grid;
+      sim.ros_grid = msg.ros_grid || [];
+      sim.intensity_grid = msg.intensity_grid || [];
+      sim.flame_length_grid = msg.flame_length_grid || [];
+      sim.time_min = msg.time_min;
+      sim.step = msg.step;
+      updateBurnProb();
+      updateStats(msg.stats);
+      renderGrid();
+      if (selectedCell) queryCell(selectedCell.row, selectedCell.col);
+      break;
+    case 'env_grids':
+      sim.env = {
+        slope_pct: msg.slope_pct || [],
+        wind_speed: msg.wind_speed || [],
+        wind_dir: msg.wind_dir || [],
+        moisture_1h: msg.moisture_1h || [],
+        elevation_m: msg.elevation_m || [],
+        fuel_codes: msg.fuel_codes || [],
+      };
+      sim.risk = {
+        fire_risk: msg.fire_risk || [],
+        terrain_risk: msg.terrain_risk || [],
+        fuel_risk: msg.fuel_risk || [],
+        wind_risk: msg.wind_risk || [],
+        moisture_risk: msg.moisture_risk || [],
+        combined_risk: msg.combined_risk || [],
+      };
+      renderGrid();
+      break;
+    case 'risk_grids':
+      sim.risk = {
+        fire_risk: msg.fire_risk || [],
+        terrain_risk: msg.terrain_risk || [],
+        fuel_risk: msg.fuel_risk || [],
+        wind_risk: msg.wind_risk || [],
+        moisture_risk: msg.moisture_risk || [],
+        combined_risk: msg.combined_risk || [],
+      };
+      renderGrid();
+      break;
+    case 'cell_detail':
+      showCellDetail(msg);
+      break;
+    case 'stats_history':
+      updateCharts(msg);
+      break;
+    case 'simulation_end':
+      playing = false;
+      document.getElementById('btnPlay').textContent = 'PLAY';
+      document.getElementById('btnPlay').classList.remove('active');
+      if (msg.summary) {
+        document.getElementById('statPeakFire').textContent = msg.summary.peak_burning_cells;
+        document.getElementById('statTotalIgn').textContent = msg.summary.total_ignitions;
+        document.getElementById('statDuration').textContent = (msg.summary.duration_min || 0).toFixed(1) + ' min';
+        document.getElementById('statFinalBurn').textContent = (msg.summary.final_burned_pct || 0).toFixed(1) + '%';
+      }
+      break;
+    case 'real_regions':
+      if (msg.regions) {
+        const sel = document.getElementById('selRegion');
+        for (const opt of sel.options) {
+          if (msg.regions[opt.value] !== undefined) {
+            opt.textContent = `${opt.value} (${msg.regions[opt.value]} pts)`;
+          }
+        }
+      }
+      break;
+  }
+}
+
+// ==========================================================================
+// Burn Probability
+// ==========================================================================
+
+function updateBurnProb() {
+  if (!sim.grid.length) return;
+  const rows = sim.grid.length, cols = sim.grid[0].length;
+  burnProbGrid = [];
+  for (let i = 0; i < rows; i++) {
+    burnProbGrid[i] = [];
+    for (let j = 0; j < cols; j++) {
+      const ros = sim.ros_grid[i]?.[j] || 0;
+      const slope = sim.env.slope_pct?.[i]?.[j] || 0;
+      const wind = sim.env.wind_speed?.[i]?.[j] || 0;
+      const moisture = sim.env.moisture_1h?.[i]?.[j] || 0.1;
+      let prob = Math.min(1, (ros * 0.15) + (slope * 0.005) + (wind * 0.02) - (moisture * 0.3));
+      prob = Math.max(0, Math.min(1, prob));
+      if (sim.grid[i][j] === 1) prob = 1.0;
+      if (sim.grid[i][j] === 2) prob = 0.95;
+      if (sim.grid[i][j] === 3) prob = 0.0;
+      burnProbGrid[i][j] = Math.round(prob * 100) / 100;
+    }
+  }
+}
+
+// ==========================================================================
+// Hexagonal Grid Rendering
+// ==========================================================================
+
+function resizeCanvas() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  gridCanvas.width = w; gridCanvas.height = h;
+  overlayCanvas.width = w; overlayCanvas.height = h;
+  if (sim.grid.length > 0) {
+    const rows = sim.grid.length, cols = sim.grid[0].length;
+    if (useHex) {
+      const hexH = Math.floor(h / (rows + 0.5));
+      const hexW = Math.floor(w / (cols * 0.866 + 0.134));
+      cellSize = Math.min(hexH, hexW);
+      offsetX = Math.floor((w - cellSize * cols * 0.866) / 2);
+      offsetY = Math.floor((h - cellSize * (rows * 0.75 + 0.25)) / 2);
+    } else {
+      cellSize = Math.min(Math.floor(w / cols), Math.floor(h / rows));
+      offsetX = Math.floor((w - cellSize * cols) / 2);
+      offsetY = Math.floor((h - cellSize * rows) / 2);
+    }
+  }
+  renderGrid();
+}
+
+function hexPath(ctx, cx, cy, size) {
+  const s = size * 0.48;
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    const x = cx + s * Math.cos(angle);
+    const y = cy + s * Math.sin(angle);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+function hexCenter(row, col) {
+  const w = cellSize * 0.866;
+  const h = cellSize * 0.75;
+  const cx = offsetX + col * w + (row % 2 === 1 ? w / 2 : 0) + w / 2;
+  const cy = offsetY + row * h + cellSize * 0.48;
+  return [cx, cy];
+}
+
+// ==========================================================================
+// Color Palettes
+// ==========================================================================
+
+const STATE_COLORS = { 0: '#2d5a27', 1: '#1a8c3c', 2: '#5c3a1e', 3: '#1a3a6e' };
+
+function getColorForValue(val, min, max, palette) {
+  const t = max > min ? Math.max(0, Math.min(1, (val - min) / (max - min))) : 0;
+  const idx = Math.min(Math.floor(t * (palette.length - 1)), palette.length - 2);
+  const frac = t * (palette.length - 1) - idx;
+  const c1 = palette[idx], c2 = palette[idx + 1];
+  return [c1[0] + (c2[0] - c1[0]) * frac, c1[1] + (c2[1] - c1[1]) * frac, c1[2] + (c2[2] - c1[2]) * frac];
+}
+
+function rgb(c) { return `rgb(${c[0]|0},${c[1]|0},${c[2]|0})`; }
+function rgba(c, a) { return `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`; }
+
+const PAL = {
+  ros: [[30,90,30],[180,180,30],[255,140,0],[220,40,40],[160,0,200]],
+  intensity: [[30,80,180],[80,180,80],[255,200,30],[255,80,30],[200,0,120]],
+  flame: [[30,100,200],[40,180,80],[200,200,40],[255,140,30],[220,30,30]],
+  slope: [[40,80,40],[100,160,50],[200,180,40],[200,90,30],[160,30,30]],
+  wind_speed: [[30,80,180],[40,160,160],[200,180,40],[255,100,30],[200,20,50]],
+  moisture: [[180,30,30],[200,100,30],[200,180,40],[80,170,80],[30,120,180]],
+  elevation: [[40,40,140],[40,140,40],[180,180,40],[180,80,40],[140,40,40]],
+  burn_prob: [[20,40,20],[30,100,30],[80,180,40],[200,200,40],[220,60,30]],
+  // Risk maps - Green (low) -> Yellow -> Orange -> Red (high)
+  fire_risk: [[20,80,20],[60,140,40],[180,180,30],[255,120,30],[220,30,30]],
+  terrain_risk: [[30,70,30],[80,130,40],[180,160,40],[180,90,30],[140,30,30]],
+  fuel_risk: [[20,80,30],[50,140,50],[140,180,40],[200,140,30],[180,40,30]],
+  wind_risk: [[30,80,180],[40,140,140],[160,180,40],[240,100,30],[200,20,50]],
+  moisture_risk: [[20,120,180],[60,160,100],[180,180,40],[200,100,30],[180,30,30]],
+  combined_risk: [[20,80,30],[50,140,50],[180,180,30],[255,100,30],[220,30,30]],
+};
+
+function getOverlayColor(i, j) {
+  let data, min, max, pal;
+  switch (currentOverlay) {
+    case 'ros': data = sim.ros_grid; min = 0; max = 8; pal = PAL.ros; break;
+    case 'intensity': data = sim.intensity_grid; min = 0; max = 8000; pal = PAL.intensity; break;
+    case 'flame': data = sim.flame_length_grid; min = 0; max = 12; pal = PAL.flame; break;
+    case 'slope': data = sim.env.slope_pct; min = 0; max = 50; pal = PAL.slope; break;
+    case 'wind_speed': data = sim.env.wind_speed; min = 0; max = 20; pal = PAL.wind_speed; break;
+    case 'moisture': data = sim.env.moisture_1h; min = 0; max = 0.4; pal = PAL.moisture; break;
+    case 'elevation': data = sim.env.elevation_m; min = 0; max = 2000; pal = PAL.elevation; break;
+    case 'burn_prob': data = burnProbGrid; min = 0; max = 1; pal = PAL.burn_prob; break;
+    case 'fire_risk': data = sim.risk.fire_risk; min = 0; max = 1; pal = PAL.fire_risk; break;
+    case 'terrain_risk': data = sim.risk.terrain_risk; min = 0; max = 1; pal = PAL.terrain_risk; break;
+    case 'fuel_risk': data = sim.risk.fuel_risk; min = 0; max = 1; pal = PAL.fuel_risk; break;
+    case 'wind_risk': data = sim.risk.wind_risk; min = 0; max = 1; pal = PAL.wind_risk; break;
+    case 'moisture_risk': data = sim.risk.moisture_risk; min = 0; max = 1; pal = PAL.moisture_risk; break;
+    case 'combined_risk': data = sim.risk.combined_risk; min = 0; max = 1; pal = PAL.combined_risk; break;
+    default: return STATE_COLORS[sim.grid[i]?.[j]] || '#333';
+  }
+  if (data && data[i] && data[i][j] !== undefined) {
+    return rgb(getColorForValue(data[i][j], min, max, pal));
+  }
+  return STATE_COLORS[sim.grid[i]?.[j]] || '#333';
+}
+
+// ==========================================================================
+// Main Render
+// ==========================================================================
+
+function renderGrid() {
+  if (!sim.grid || !sim.grid.length) return;
+  const rows = sim.grid.length, cols = sim.grid[0].length;
+  gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+  overCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+  // Background
+  gridCtx.fillStyle = '#080c12';
+  gridCtx.fillRect(0, 0, gridCanvas.width, gridCanvas.height);
+
+  if (useHex) renderHexGrid(rows, cols);
+  else renderSquareGrid(rows, cols);
+
+  // Contours
+  if (document.getElementById('chkContours').checked && sim.env.elevation_m?.length) {
+    renderContours(rows, cols);
+  }
+
+  // Spread arrows
+  if (document.getElementById('chkArrows').checked) {
+    renderSpreadArrows(rows, cols);
+  }
+
+  // Selection highlight
+  if (selectedCell) {
+    const [cx, cy] = useHex ? hexCenter(selectedCell.row, selectedCell.col) :
+      [offsetX + selectedCell.col * cellSize + cellSize / 2, offsetY + selectedCell.row * cellSize + cellSize / 2];
+    gridCtx.strokeStyle = '#fff';
+    gridCtx.lineWidth = 2;
+    if (useHex) {
+      hexPath(gridCtx, cx, cy, cellSize);
+      gridCtx.stroke();
+    } else {
+      gridCtx.strokeRect(offsetX + selectedCell.col * cellSize, offsetY + selectedCell.row * cellSize, cellSize, cellSize);
+    }
+  }
+}
+
+function renderHexGrid(rows, cols) {
+  const showNumbers = document.getElementById('chkNumbers').checked;
+
+  for (let i = 0; i < rows; i++) {
+    for (let j = 0; j < cols; j++) {
+      const [cx, cy] = hexCenter(i, j);
+      const state = sim.grid[i][j];
+      let fillColor = STATE_COLORS[state] || '#333';
+      if (currentOverlay !== 'state') fillColor = getOverlayColor(i, j);
+
+      // Fill hex
+      hexPath(gridCtx, cx, cy, cellSize);
+      gridCtx.fillStyle = fillColor;
+      gridCtx.fill();
+
+      // Hex border
+      hexPath(gridCtx, cx, cy, cellSize);
+      gridCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+      gridCtx.lineWidth = 0.5;
+      gridCtx.stroke();
+
+      // Hatching for fire cells
+      if (state === 1) {
+        gridCtx.save();
+        hexPath(gridCtx, cx, cy, cellSize);
+        gridCtx.clip();
+        gridCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+        gridCtx.lineWidth = 0.8;
+        for (let d = -cellSize; d < cellSize * 2; d += 4) {
+          gridCtx.beginPath();
+          gridCtx.moveTo(cx + d, cy - cellSize);
+          gridCtx.lineTo(cx + d + cellSize, cy + cellSize);
+          gridCtx.stroke();
+        }
+        gridCtx.restore();
+      }
+
+      // Burn probability number
+      if (showNumbers && burnProbGrid[i] && burnProbGrid[i][j] > 0.05 && state !== 3) {
+        const prob = burnProbGrid[i][j];
+        gridCtx.fillStyle = state === 1 ? '#fff' : (prob > 0.5 ? '#ffdd44' : '#aacc88');
+        gridCtx.font = `${Math.max(7, cellSize * 0.22)}px Consolas, monospace`;
+        gridCtx.textAlign = 'center';
+        gridCtx.textBaseline = 'middle';
+        gridCtx.fillText(prob.toFixed(2), cx, cy + cellSize * 0.15);
+      }
+
+      // Fuel code label for large cells
+      if (cellSize > 28 && state === 0) {
+        const fuel = sim.env.fuel_codes?.[i]?.[j] || '';
+        if (fuel) {
+          gridCtx.fillStyle = 'rgba(255,255,255,0.25)';
+          gridCtx.font = `${Math.max(6, cellSize * 0.15)}px Consolas`;
+          gridCtx.textAlign = 'center';
+          gridCtx.fillText(fuel, cx, cy - cellSize * 0.15);
+        }
+      }
+    }
+  }
+}
+
+function renderSquareGrid(rows, cols) {
+  const showNumbers = document.getElementById('chkNumbers').checked;
+
+  for (let i = 0; i < rows; i++) {
+    for (let j = 0; j < cols; j++) {
+      const state = sim.grid[i][j];
+      let fillColor = STATE_COLORS[state] || '#333';
+      if (currentOverlay !== 'state') fillColor = getOverlayColor(i, j);
+
+      gridCtx.fillStyle = fillColor;
+      gridCtx.fillRect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
+
+      gridCtx.strokeStyle = 'rgba(255,255,255,0.06)';
+      gridCtx.lineWidth = 0.5;
+      gridCtx.strokeRect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
+
+      // Hatching
+      if (state === 1 && cellSize > 6) {
+        gridCtx.save();
+        gridCtx.beginPath();
+        gridCtx.rect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
+        gridCtx.clip();
+        gridCtx.strokeStyle = 'rgba(255,255,255,0.12)';
+        gridCtx.lineWidth = 0.6;
+        for (let d = -cellSize; d < cellSize * 2; d += 4) {
+          const x0 = offsetX + j * cellSize + d;
+          gridCtx.beginPath();
+          gridCtx.moveTo(x0, offsetY + i * cellSize);
+          gridCtx.lineTo(x0 + cellSize, offsetY + (i + 1) * cellSize);
+          gridCtx.stroke();
+        }
+        gridCtx.restore();
+      }
+
+      if (showNumbers && burnProbGrid[i] && burnProbGrid[i][j] > 0.05 && state !== 3) {
+        const prob = burnProbGrid[i][j];
+        gridCtx.fillStyle = state === 1 ? '#fff' : (prob > 0.5 ? '#ffdd44' : '#aacc88');
+        gridCtx.font = `${Math.max(7, cellSize * 0.28)}px Consolas, monospace`;
+        gridCtx.textAlign = 'center';
+        gridCtx.textBaseline = 'middle';
+        gridCtx.fillText(prob.toFixed(2), offsetX + j * cellSize + cellSize / 2, offsetY + i * cellSize + cellSize / 2 + cellSize * 0.15);
+      }
+    }
+  }
+}
+
+// ==========================================================================
+// Contour Lines (Elevation)
+// ==========================================================================
+
+function renderContours(rows, cols) {
+  const elev = sim.env.elevation_m;
+  if (!elev || !elev.length) return;
+  const levels = [200, 500, 800, 1000, 1200, 1500, 1800];
+
+  gridCtx.strokeStyle = 'rgba(255,255,255,0.2)';
+  gridCtx.lineWidth = 0.8;
+  gridCtx.setLineDash([3, 3]);
+
+  for (const level of levels) {
+    for (let i = 0; i < rows - 1; i++) {
+      for (let j = 0; j < cols - 1; j++) {
+        const v00 = elev[i]?.[j] || 0;
+        const v10 = elev[i + 1]?.[j] || 0;
+        const v01 = elev[i]?.[j + 1] || 0;
+
+        // Horizontal edge
+        if ((v00 < level && v10 >= level) || (v00 >= level && v10 < level)) {
+          const t = (level - v00) / (v10 - v00);
+          let cx, cy;
+          if (useHex) {
+            const [x0, y0] = hexCenter(i, j);
+            const [x1, y1] = hexCenter(i + 1, j);
+            cx = x0 + (x1 - x0) * t;
+            cy = y0 + (y1 - y0) * t;
+          } else {
+            cx = offsetX + j * cellSize + cellSize / 2;
+            cy = offsetY + (i + t) * cellSize;
+          }
+          gridCtx.beginPath();
+          gridCtx.arc(cx, cy, 1.5, 0, Math.PI * 2);
+          gridCtx.stroke();
+        }
+
+        // Vertical edge
+        if ((v00 < level && v01 >= level) || (v00 >= level && v01 < level)) {
+          const t = (level - v00) / (v01 - v00);
+          let cx, cy;
+          if (useHex) {
+            const [x0, y0] = hexCenter(i, j);
+            const [x1, y1] = hexCenter(i, j + 1);
+            cx = x0 + (x1 - x0) * t;
+            cy = y0 + (y1 - y0) * t;
+          } else {
+            cx = offsetX + (j + t) * cellSize;
+            cy = offsetY + i * cellSize + cellSize / 2;
+          }
+          gridCtx.beginPath();
+          gridCtx.arc(cx, cy, 1.5, 0, Math.PI * 2);
+          gridCtx.stroke();
+        }
+      }
+    }
+  }
+  gridCtx.setLineDash([]);
+}
+
+// ==========================================================================
+// Spread Vector Arrows
+// ==========================================================================
+
+function renderSpreadArrows(rows, cols) {
+  overCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+  for (let i = 0; i < rows; i++) {
+    for (let j = 0; j < cols; j++) {
+      if (sim.grid[i][j] !== 1) continue;
+
+      const windDir = sim.env.wind_dir?.[i]?.[j] || 270;
+      const windSpeed = sim.env.wind_speed?.[i]?.[j] || 3;
+      const ros = sim.ros_grid?.[i]?.[j] || 0;
+      const slope = sim.env.slope_pct?.[i]?.[j] || 0;
+
+      // Spread direction = wind direction + 180 (wind blows FROM direction, fire spreads TOWARD)
+      const spreadDir = (windDir + 180) % 360;
+      const rad = spreadDir * Math.PI / 180;
+
+      let cx, cy;
+      if (useHex) {
+        [cx, cy] = hexCenter(i, j);
+      } else {
+        cx = offsetX + j * cellSize + cellSize / 2;
+        cy = offsetY + i * cellSize + cellSize / 2;
+      }
+
+      const len = cellSize * 0.35 * Math.min(windSpeed / 10, 1.5);
+      const endX = cx + Math.sin(rad) * len;
+      const endY = cy - Math.cos(rad) * len;
+
+      // Arrow line
+      overCtx.strokeStyle = ros > 3 ? 'rgba(80,255,120,0.8)' : 'rgba(80,200,120,0.5)';
+      overCtx.lineWidth = 1.5;
+      overCtx.beginPath();
+      overCtx.moveTo(cx, cy);
+      overCtx.lineTo(endX, endY);
+      overCtx.stroke();
+
+      // Arrowhead
+      const headLen = 4;
+      const headAngle = 0.5;
+      overCtx.beginPath();
+      overCtx.moveTo(endX, endY);
+      overCtx.lineTo(endX - headLen * Math.cos(rad - headAngle), endY - headLen * Math.sin(rad - headAngle));
+      overCtx.moveTo(endX, endY);
+      overCtx.lineTo(endX - headLen * Math.cos(rad + headAngle), endY - headLen * Math.sin(rad + headAngle));
+      overCtx.stroke();
+
+      // Wind + Slope label
+      if (cellSize > 20) {
+        overCtx.fillStyle = 'rgba(255,255,255,0.5)';
+        overCtx.font = `${Math.max(6, cellSize * 0.14)}px Consolas`;
+        overCtx.textAlign = 'center';
+        overCtx.fillText(`W+S`, cx, cy - cellSize * 0.28);
+      }
+    }
+  }
+}
+
+// ==========================================================================
+// Charts
+// ==========================================================================
+
+const chartOpts = (title) => ({
+  responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
+  plugins: { legend: { display: false }, title: { display: true, text: title, color: '#7a8599', font: { size: 10, family: 'Consolas' } } },
+  scales: {
+    x: { ticks: { color: '#7a8599', font: { size: 8 }, maxTicksLimit: 5 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+    y: { ticks: { color: '#7a8599', font: { size: 8 }, maxTicksLimit: 4 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+  },
+  elements: { point: { radius: 0 }, line: { borderWidth: 1.2 } },
+});
+
+function initCharts() {
+  chartBurning = new Chart(document.getElementById('chartBurning'), {
+    type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#ff4d3a', backgroundColor: 'rgba(255,77,58,0.08)', fill: true }] },
+    options: chartOpts('Active Fire Cells'),
+  });
+  chartFraction = new Chart(document.getElementById('chartFraction'), {
+    type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#e6a817', backgroundColor: 'rgba(230,168,23,0.08)', fill: true }] },
+    options: chartOpts('Burned Fraction %'),
+  });
+  chartIgnitions = new Chart(document.getElementById('chartIgnitions'), {
+    type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: 'rgba(77,166,255,0.5)', borderColor: '#4da6ff', borderWidth: 1 }] },
+    options: chartOpts('New Ignitions'),
+  });
+  chartRos = new Chart(document.getElementById('chartRos'), {
+    type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.08)', fill: true }] },
+    options: chartOpts('Avg ROS m/min'),
+  });
+}
+
+function updateCharts(stats) {
+  if (!stats.time) return;
+  const labels = stats.time.map(t => t.toFixed(0));
+  chartBurning.data.labels = labels; chartBurning.data.datasets[0].data = stats.burning; chartBurning.update('none');
+  chartFraction.data.labels = labels; chartFraction.data.datasets[0].data = stats.fraction.map(f => (f * 100).toFixed(2)); chartFraction.update('none');
+  chartIgnitions.data.labels = labels; chartIgnitions.data.datasets[0].data = stats.ignitions; chartIgnitions.update('none');
+  chartRos.data.labels = labels; chartRos.data.datasets[0].data = stats.ros_avg; chartRos.update('none');
+}
+
+// ==========================================================================
+// UI Updates
+// ==========================================================================
+
+function updateStats(stats) {
+  document.getElementById('hdrTime').textContent = sim.time_min.toFixed(1) + ' min';
+  document.getElementById('hdrStep').textContent = sim.step;
+  document.getElementById('hdrBurning').textContent = stats.burning;
+  document.getElementById('hdrBurned').textContent = (stats.burned_frac * 100).toFixed(1) + '%';
+  document.getElementById('hdrRos').textContent = stats.ros_avg.toFixed(2) + ' m/min';
+  document.getElementById('hdrIntensity').textContent = stats.intensity_avg.toFixed(0) + ' kW/m';
+}
+
+function showCellDetail(d) {
+  const stateMap = { 'UNBURNED': 'Unburned', 'BURNING': 'ACTIVE FIRE', 'BURNED': 'Burned', 'FIREBREAK': 'Firebreak' };
+  const stateColors = { 'UNBURNED': '#2d5a27', 'BURNING': '#ff4d3a', 'BURNED': '#5c3a1e', 'FIREBREAK': '#1a3a6e' };
+
+  let html = `<div class="row"><span class="k">Pos:</span><span class="v">(${d.row}, ${d.col})</span></div>`;
+  html += `<div class="row"><span class="k">State:</span><span class="v" style="color:${stateColors[d.state]}">${stateMap[d.state] || d.state}</span></div>`;
+  html += `<div class="row"><span class="k">Fuel:</span><span class="v">${d.fuel_code}</span></div>`;
+  if (burnProbGrid[d.row] && burnProbGrid[d.row][d.col] !== undefined) {
+    html += `<div class="row"><span class="k">P(burn):</span><span class="v" style="color:${burnProbGrid[d.row][d.col] > 0.5 ? '#ffdd44' : '#aacc88'}">${burnProbGrid[d.row][d.col].toFixed(2)}</span></div>`;
+  }
+  document.getElementById('cellInfo').innerHTML = html;
+
+  if (d.state === 'BURNING') {
+    document.getElementById('firePropsPanel').style.display = 'block';
+    let fp = '';
+    fp += row('ROS Rothermel', d.ros_rothermel?.toFixed(3) + ' m/min');
+    fp += row('Fireline Intensity', d.fireline_intensity?.toFixed(1) + ' kW/m');
+    fp += row('Flame Length', d.flame_length?.toFixed(3) + ' m');
+    fp += row('Reaction Intensity', d.reaction_intensity?.toFixed(1) + ' kW/m2');
+    fp += row('Residence Time', d.residence_time?.toFixed(3) + ' min');
+    fp += row('Fuel Consumption', d.fuel_consumption?.toFixed(4) + ' kg/m2');
+    fp += row('Phi Wind', d.phi_w?.toFixed(4));
+    fp += row('Phi Slope', d.phi_s?.toFixed(4));
+    fp += row('Phi Effective', d.phi_eff?.toFixed(4));
+    fp += row('Heat/Unit Area', d.heat_per_unit_area?.toFixed(1) + ' kJ/m2');
+    fp += row('Spread Dir', d.spread_direction?.toFixed(1) + ' deg');
+    fp += row('Delta ROS (AI)', d.delta_ros?.toFixed(4));
+    if (d.ignition_time !== null) fp += row('Ignition Time', d.ignition_time?.toFixed(2) + ' min');
+    fp += row('Burn Duration', d.burn_duration?.toFixed(2) + ' min');
+    fp += row('Burn Elapsed', d.burn_elapsed?.toFixed(2) + ' min');
+    document.getElementById('fireProps').innerHTML = fp;
+  } else {
+    document.getElementById('firePropsPanel').style.display = 'none';
+  }
+
+  document.getElementById('envPropsPanel').style.display = 'block';
+  let ep = '';
+  ep += row('Slope', d.slope_pct?.toFixed(1) + ' %');
+  ep += row('Aspect', d.aspect_deg?.toFixed(1) + ' deg');
+  ep += row('Elevation', d.elevation_m?.toFixed(1) + ' m');
+  ep += row('Wind Speed', d.wind_speed_ms?.toFixed(2) + ' m/s');
+  ep += row('Wind Dir', d.wind_dir_deg?.toFixed(1) + ' deg');
+  ep += row('RH', d.rh_percent?.toFixed(1) + ' %');
+  ep += row('Temp', d.temp_c?.toFixed(1) + ' C');
+  ep += row('Moisture 1h', d.moisture_1h?.toFixed(3));
+  ep += row('Moisture 10h', d.moisture_10h?.toFixed(3));
+  ep += row('Moisture 100h', d.moisture_100h?.toFixed(3));
+  document.getElementById('envProps').innerHTML = ep;
+}
+
+function row(k, v) { return `<div class="row"><span class="k">${k}:</span><span class="v">${v ?? '-'}</span></div>`; }
+
+// ==========================================================================
+// User Actions
+// ==========================================================================
+
+function togglePlay() {
+  if (playing) {
+    playing = false;
+    document.getElementById('btnPlay').textContent = 'PLAY';
+    document.getElementById('btnPlay').classList.remove('active');
+    ws.send(JSON.stringify({ cmd: 'pause' }));
+  } else {
+    playing = true;
+    document.getElementById('btnPlay').textContent = 'PAUSE';
+    document.getElementById('btnPlay').classList.add('active');
+    ws.send(JSON.stringify({ cmd: 'play', speed: parseFloat(document.getElementById('speedSlider').value) }));
+  }
+}
+
+function doStep() { ws.send(JSON.stringify({ cmd: 'step' })); }
+
+function doReset() {
+  playing = false;
+  document.getElementById('btnPlay').textContent = 'PLAY';
+  document.getElementById('btnPlay').classList.remove('active');
+  selectedCell = null;
+  document.getElementById('cellInfo').innerHTML = 'Click on a cell';
+  document.getElementById('firePropsPanel').style.display = 'none';
+  document.getElementById('envPropsPanel').style.display = 'none';
+  ['statPeakFire','statTotalIgn','statDuration','statFinalBurn'].forEach(id => document.getElementById(id).textContent = '-');
+  ws.send(JSON.stringify({ cmd: 'reset' }));
+}
+
+function setSpeed(v) { document.getElementById('speedLabel').textContent = v + 'x'; ws.send(JSON.stringify({ cmd: 'set_speed', speed: parseFloat(v) })); }
+function setDt(v) { document.getElementById('dtLabel').textContent = v + ' min'; ws.send(JSON.stringify({ cmd: 'set_dt', dt: parseFloat(v) })); }
+
+function setOverlay(name) {
+  currentOverlay = name;
+  document.querySelectorAll('.overlay-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  updateLegend(name);
+  renderGrid();
+}
+
+function updateLegend(name) {
+  const legends = {
+    state: [['#2d5a27','Unburned'],['#1a8c3c','Active Fire'],['#5c3a1e','Burned'],['#1a3a6e','Firebreak']],
+    ros: [['#1e5a1e','0'],['#b4b41e','4'],['#ff8c00','6'],['#dc2828','8'],['#a000c8','10+']],
+    intensity: [['#1e50b4','0'],['#50b450','4000'],['#ffc81e','8000'],['#ff501e','12000'],['#c80078','16000+']],
+    flame: [['#1e64c8','0'],['#28b450','4'],['#c8c828','8'],['#ff8c1e','12'],['#dc1e1e','16+']],
+    burn_prob: [['#142814','0.0'],['#1e641e','0.2'],['#50b428','0.4'],['#c8c828','0.6'],['#dc3c1e','0.8'],['#ff4d3a','1.0']],
+    slope: [['#285028','0%'],['#64a032','15%'],['#c8b428','30%'],['#c85a1e','45%'],['#a01e1e','60%+']],
+    wind_speed: [['#1e50b4','0 m/s'],['#28a0a0','5'],['#c8c828','10'],['#ff641e','15'],['#c81432','20+']],
+    moisture: [['#b41e1e','0%'],['#c8641e','10%'],['#c8b428','20%'],['#50aa50','30%'],['#1e78b4','40%+']],
+    elevation: [['#28288c','0m'],['#288c28','500'],['#b4b428','1000'],['#b45028','1500'],['#8c2828','2000+']],
+    // Risk maps
+    fire_risk: [['#145014','0.0'],['#3c8c28','0.2'],['#b4b41e','0.4'],['#ff781e','0.6'],['#dc1e1e','0.8'],['#ff4d3a','1.0']],
+    terrain_risk: [['#1e461e','0.0'],['#508228','0.2'],['#b4a01e','0.4'],['#b45a1e','0.6'],['#8c1e1e','0.8'],['#dc3c1e','1.0']],
+    fuel_risk: [['#145014','0.0'],['#328c32','0.2'],['#8cb41e','0.4'],['#c88c1e','0.6'],['#b4281e','0.8'],['#dc1e1e','1.0']],
+    wind_risk: [['#1e50b4','0.0'],['#28a0a0','0.2'],['#c8c828','0.4'],['#ff641e','0.6'],['#c81432','0.8'],['#ff4d3a','1.0']],
+    moisture_risk: [['#1e78b4','0.0'],['#50aa50','0.2'],['#c8c828','0.4'],['#c8641e','0.6'],['#b41e1e','0.8'],['#dc1e1e','1.0']],
+    combined_risk: [['#145014','0.0 Low'],['#328c32','0.2'],['#b4b41e','0.4 Medium'],['#ff781e','0.6 High'],['#dc1e1e','0.8'],['#ff4d3a','1.0 Extreme']],
+  };
+  const items = legends[name] || [];
+  document.getElementById('legend').innerHTML = items.map(([c, l]) => `<div class="legend-item"><div class="legend-swatch" style="background:${c};"></div>${l}</div>`).join('');
+}
+
+function toggleHex() { useHex = document.getElementById('chkHex').checked; resizeCanvas(); }
+
+function queryCell(row, col) {
+  selectedCell = { row, col };
+  ws.send(JSON.stringify({ cmd: 'query_cell', row, col }));
+}
+
+function loadRealData() {
+  const region = document.getElementById('selRegion').value;
+  if (region === 'uniform') { loadUniformGrid(); return; }
+  const rows = parseInt(document.getElementById('cfgRows').value) || 40;
+  const cellSize = parseInt(document.getElementById('cfgCellSize').value) || 10;
+  playing = false;
+  document.getElementById('btnPlay').textContent = 'PLAY';
+  document.getElementById('btnPlay').classList.remove('active');
+  ws.send(JSON.stringify({ cmd: 'load_real_data', region, rows, cols: rows, cell_size_m: cellSize }));
+}
+
+function loadUniformGrid() {
+  const rows = parseInt(document.getElementById('cfgRows').value) || 40;
+  const cellSize = parseInt(document.getElementById('cfgCellSize').value) || 10;
+  const fuel = document.getElementById('cfgFuel').value;
+  const wind = parseFloat(document.getElementById('cfgWind').value) || 5;
+  const windDir = parseFloat(document.getElementById('cfgWindDir').value) || 270;
+  const slope = parseFloat(document.getElementById('cfgSlope').value) || 0;
+  const moisture = parseFloat(document.getElementById('cfgMoisture').value) || 0.06;
+  playing = false;
+  document.getElementById('btnPlay').textContent = 'PLAY';
+  document.getElementById('btnPlay').classList.remove('active');
+  ws.send(JSON.stringify({
+    cmd: 'configure', rows, cols: rows, cell_size_m: cellSize,
+    fuel_code: fuel, wind_speed_ms: wind, wind_dir_deg: windDir,
+    slope_pct: slope, moisture_1h: moisture,
+  }));
+}
+
+// ==========================================================================
+// Mouse Events
+// ==========================================================================
+
+function getCellFromMouse(e) {
+  const rect = wrap.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  if (!sim.grid.length) return null;
+
+  if (useHex) {
+    let best = null, bestDist = Infinity;
+    const rows = sim.grid.length, cols = sim.grid[0].length;
+    for (let i = 0; i < rows; i++) {
+      for (let j = 0; j < cols; j++) {
+        const [cx, cy] = hexCenter(i, j);
+        const d = (mx - cx) ** 2 + (my - cy) ** 2;
+        if (d < bestDist) { bestDist = d; best = { row: i, col: j }; }
+      }
+    }
+    if (best && bestDist < (cellSize * 0.5) ** 2) return best;
+    return null;
+  } else {
+    const col = Math.floor((mx - offsetX) / cellSize);
+    const row = Math.floor((my - offsetY) / cellSize);
+    if (row < 0 || row >= sim.grid.length || col < 0 || col >= sim.grid[0].length) return null;
+    return { row, col };
+  }
+}
+
+wrap.addEventListener('click', (e) => {
+  const cell = getCellFromMouse(e);
+  if (cell) { queryCell(cell.row, cell.col); renderGrid(); }
+});
+
+wrap.addEventListener('dblclick', (e) => {
+  const cell = getCellFromMouse(e);
+  if (cell) ws.send(JSON.stringify({ cmd: 'ignite', row: cell.row, col: cell.col }));
+});
+
+wrap.addEventListener('mousemove', (e) => {
+  const cell = getCellFromMouse(e);
+  if (!cell || !sim.grid.length) { document.getElementById('tooltip').style.display = 'none'; return; }
+  const state = sim.grid[cell.row]?.[cell.col];
+  const ros = sim.ros_grid[cell.row]?.[cell.col];
+  const prob = burnProbGrid[cell.row]?.[cell.col];
+  const wind = sim.env.wind_speed?.[cell.row]?.[cell.col];
+  const slope = sim.env.slope_pct?.[cell.row]?.[cell.col];
+
+  // Risk values
+  const combinedRisk = sim.risk.combined_risk?.[cell.row]?.[cell.col];
+  const fireRisk = sim.risk.fire_risk?.[cell.row]?.[cell.col];
+  const terrainRisk = sim.risk.terrain_risk?.[cell.row]?.[cell.col];
+  const fuelRisk = sim.risk.fuel_risk?.[cell.row]?.[cell.col];
+
+  const sn = { 0: 'Unburned', 1: 'ACTIVE FIRE', 2: 'Burned', 3: 'Firebreak' };
+  let tt = `<div class="tt-title">(${cell.row}, ${cell.col}) ${sn[state] || state}</div>`;
+  if (prob !== undefined) tt += `<div class="tt-row"><span class="tt-k">P(burn):</span><span class="tt-v" style="color:${prob > 0.5 ? '#ffdd44' : '#aacc88'}">${prob.toFixed(2)}</span></div>`;
+  if (ros > 0) tt += `<div class="tt-row"><span class="tt-k">ROS:</span><span class="tt-v">${ros.toFixed(2)} m/min</span></div>`;
+  if (combinedRisk !== undefined) {
+    const riskColor = combinedRisk > 0.7 ? '#ff4d3a' : combinedRisk > 0.4 ? '#ffaa33' : '#44cc44';
+    tt += `<div class="tt-row"><span class="tt-k">Risk:</span><span class="tt-v" style="color:${riskColor}">${(combinedRisk * 100).toFixed(0)}%</span></div>`;
+    tt += `<div class="tt-row"><span class="tt-k">  Fire:</span><span class="tt-v">${(fireRisk * 100).toFixed(0)}%</span></div>`;
+    tt += `<div class="tt-row"><span class="tt-k">  Terrain:</span><span class="tt-v">${(terrainRisk * 100).toFixed(0)}%</span></div>`;
+    tt += `<div class="tt-row"><span class="tt-k">  Fuel:</span><span class="tt-v">${(fuelRisk * 100).toFixed(0)}%</span></div>`;
+  }
+  if (wind !== undefined) tt += `<div class="tt-row"><span class="tt-k">Wind:</span><span class="tt-v">${wind.toFixed(1)} m/s</span></div>`;
+  if (slope !== undefined) tt += `<div class="tt-row"><span class="tt-k">Slope:</span><span class="tt-v">${slope.toFixed(1)}%</span></div>`;
+
+  const tooltip = document.getElementById('tooltip');
+  tooltip.innerHTML = tt;
+  tooltip.style.display = 'block';
+  tooltip.style.left = (e.clientX - wrap.getBoundingClientRect().left + 14) + 'px';
+  tooltip.style.top = (e.clientY - wrap.getBoundingClientRect().top - 10) + 'px';
+});
+
+wrap.addEventListener('mouseleave', () => { document.getElementById('tooltip').style.display = 'none'; });
+
+let panning = false, panX = 0, panY = 0;
+wrap.addEventListener('mousedown', (e) => { if (e.button === 1) { panning = true; panX = e.clientX - offsetX; panY = e.clientY - offsetY; e.preventDefault(); } });
+window.addEventListener('mousemove', (e) => { if (panning) { offsetX = e.clientX - panX; offsetY = e.clientY - panY; renderGrid(); } });
+window.addEventListener('mouseup', () => { panning = false; });
+wrap.addEventListener('wheel', (e) => { e.preventDefault(); cellSize = Math.max(4, Math.min(80, cellSize * (e.deltaY > 0 ? 0.92 : 1.08))); renderGrid(); });
+
+// ==========================================================================
+// Init
+// ==========================================================================
+
+window.addEventListener('resize', resizeCanvas);
+initCharts();
+connect();
+resizeCanvas();
+</script>
+</body>
+</html>
