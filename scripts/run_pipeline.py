@@ -40,6 +40,29 @@ class PipelineRunner:
         self._load_corrector()
 
     def _load_corrector(self):
+               # 1. Tenter de charger le correcteur final en priorité
+        try:
+            import sys
+            from pathlib import Path
+            current_dir = Path(__file__).resolve().parent
+            final_corrector_dir = current_dir.parent / "burntrack" / "correcteur final"
+            
+            # Vérifier si les fichiers clés existent avant d'ajouter au path
+            checkpoint_path = final_corrector_dir / "checkpoints" / "burntrack_mlp_minimal.pt"
+            if checkpoint_path.exists():
+                if str(final_corrector_dir) not in sys.path:
+                    sys.path.insert(0, str(final_corrector_dir))
+                from bridge import BurnTrackPredictor
+                self.corrector = BurnTrackPredictor(
+                    model_path=str(checkpoint_path),
+                    scaler_path=str(final_corrector_dir / "scaler.pkl"),
+                    fuel_encoding_path=str(final_corrector_dir / "fuel_encoding.json")
+                )
+                self.corrector_type = "correcteur_final"
+                return
+        except Exception as e:
+            warnings.warn(f"Could not load correcteur final: {e}")
+        # 2. Rétrocompatibilité avec les anciens modèles RF / XGB / MLP
         import joblib
 
         for model_file in ["rf_corrector.joblib", "xgb_corrector.joblib"]:
