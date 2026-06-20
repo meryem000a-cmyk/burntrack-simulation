@@ -34,10 +34,13 @@ from pathlib import Path
 import sys
 from pathlib import Path
 
-# Ajouter la racine du projet au path
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+# Ajouter la racine du projet et le dossier local au path
+_BRIDGE_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _BRIDGE_DIR.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+if str(_BRIDGE_DIR) not in sys.path:
+    sys.path.insert(0, str(_BRIDGE_DIR))
 
 from burntrack.engine.rothermel import (
     RothermelEngine, FuelModel as RothermelFuelModel, 
@@ -46,6 +49,7 @@ from burntrack.engine.rothermel import (
 from burntrack.engine.fuel_models import get_fuel_model
 
 from source.model import BurnTrackMLPMinimal
+
 
 
 # =====================================================================
