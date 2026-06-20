@@ -32,7 +32,6 @@ from pathlib import Path
 
 # === IMPORTS MOTEUR BURNTRACK ===
 import sys
-from pathlib import Path
 
 # Ajouter la racine du projet et le dossier local au path
 _BRIDGE_DIR = Path(__file__).resolve().parent
@@ -49,7 +48,6 @@ from burntrack.engine.rothermel import (
 from burntrack.engine.fuel_models import get_fuel_model
 
 from source.model import BurnTrackMLPMinimal
-
 
 
 # =====================================================================
@@ -77,6 +75,24 @@ class BurnTrackPredictor:
         """
         # 1. Moteur Rothermel v3
         self.rothermel = RothermelEngine()
+
+        # Résoudre les chemins par défaut et relatifs relativement au dossier de bridge.py
+        BRIDGE_DIR = Path(__file__).resolve().parent
+        
+        if model_path == "checkpoints/burntrack_mlp_minimal.pt":
+            model_path = str(BRIDGE_DIR / "checkpoints" / "burntrack_mlp_minimal.pt")
+        elif not Path(model_path).exists() and (BRIDGE_DIR / model_path).exists():
+            model_path = str(BRIDGE_DIR / model_path)
+            
+        if scaler_path == "scaler.pkl":
+            scaler_path = str(BRIDGE_DIR / "scaler.pkl")
+        elif not Path(scaler_path).exists() and (BRIDGE_DIR / scaler_path).exists():
+            scaler_path = str(BRIDGE_DIR / scaler_path)
+            
+        if fuel_encoding_path == "fuel_encoding.json":
+            fuel_encoding_path = str(BRIDGE_DIR / "fuel_encoding.json")
+        elif not Path(fuel_encoding_path).exists() and (BRIDGE_DIR / fuel_encoding_path).exists():
+            fuel_encoding_path = str(BRIDGE_DIR / fuel_encoding_path)
 
         # 2. Correcteur MLP
         checkpoint = torch.load(model_path, map_location='cpu')
@@ -129,8 +145,6 @@ class BurnTrackPredictor:
             raise ValueError(f"Fuel '{fuel_id}' inconnu. Vérifie fuel_models.py")
 
         # Conversion vers le format RothermelFuelModel
-        # Note: fuel_models.py et rothermel.py ont des FuelModel légèrement différents
-        # On adapte ici
         rothermel_fuel = RothermelFuelModel(
             name=fuel_model.code,
             w_1h=fuel_model.w_1h,
@@ -144,20 +158,20 @@ class BurnTrackPredictor:
             sigma_live_herb=fuel_model.sigma_live_herb,
             sigma_live_woody=fuel_model.sigma_live_woody,
             delta=fuel_model.delta,
-            mx=fuel_model.mx,  # fuel_models.py a mx en %, rothermel.py attend % aussi
+            mx=fuel_model.mx,
             h_dead=fuel_model.h_dead,
             h_live=fuel_model.h_live,
-            st=0.0555,  # Valeurs par défaut si absentes
+            st=0.0555,
             se=0.01
         )
 
         # Construction des humidités
         moisture = MoistureInputs(
             m_1h=moisture_1h,
-            m_10h=moisture_1h * 1.5,  # Approximation standard
-            m_100h=moisture_1h * 2.0,  # Approximation standard
+            m_10h=moisture_1h * 1.5,
+            m_100h=moisture_1h * 2.0,
             m_live_herb=moisture_live,
-            m_live_woody=moisture_live * 1.2  # Approximation standard
+            m_live_woody=moisture_live * 1.2
         )
 
         # Conditions environnementales
@@ -180,16 +194,6 @@ class BurnTrackPredictor:
                                ros_r: float) -> np.ndarray:
         """
         Prépare les features pour le MLP (target encoding + normalisation).
-
-        Args:
-            fuel_id: Fuel model africain
-            wind_speed: Vent (m/s)
-            moisture_1h: Humidité (fraction)
-            slope_pct: Pente (%)
-            ros_r: ROS prédite par Rothermel
-
-        Returns:
-            Features normalisées (1, n_features)
         """
         # Target encoding du fuel
         fuel_encoded = self.fuel_encoding.get(fuel_id, 
@@ -222,18 +226,6 @@ class BurnTrackPredictor:
                 return_components: bool = False) -> Union[float, Dict]:
         """
         Prédit la ROS corrigée : Rothermel + MLP.
-
-        Args:
-            fuel_id: Fuel model africain (ex: 'AF_MIOMBO', 'GR3')
-            wind_speed: Vitesse du vent (m/s)
-            moisture_1h: Humidité combustible mort 1h (fraction, 0-1)
-            moisture_live: Humidité combustible vivant (fraction, 0-1)
-            slope_pct: Pente (%)
-            angle_wind_slope: Angle vent/pente (degrés)
-            return_components: Si True, retourne un dict avec tous les détails
-
-        Returns:
-            ROS_burntrack (m/min) ou dict avec ROS_r, delta, ROS_final, etc.
         """
         # 1. Prédiction Rothermel v3
         ros_r = self._get_rothermel_prediction(
@@ -287,12 +279,6 @@ class BurnTrackPredictor:
     def predict_batch(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Prédit sur un batch de données (DataFrame).
-
-        Args:
-            df: DataFrame avec colonnes: fuel_model, wind_speed, moisture_1h, slope_pct, ...
-
-        Returns:
-            DataFrame enrichi avec ROS_r, delta, ROS_burntrack
         """
         results = []
 
