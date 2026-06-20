@@ -40,7 +40,7 @@ class PipelineRunner:
         self._load_corrector()
 
     def _load_corrector(self):
-               # 1. Tenter de charger le correcteur final en priorité
+        # 1. Tenter de charger le correcteur final en priorité
         try:
             import sys
             from pathlib import Path
@@ -62,6 +62,7 @@ class PipelineRunner:
                 return
         except Exception as e:
             warnings.warn(f"Could not load correcteur final: {e}")
+
         # 2. Rétrocompatibilité avec les anciens modèles RF / XGB / MLP
         import joblib
 
@@ -100,7 +101,31 @@ class PipelineRunner:
             print("ERROR: burntrack.engine not found.")
             return {}
 
-        fuel = FuelModel(fuel_code)
+        from burntrack.engine.fuel_models import get_fuel_model
+        fuel_raw = get_fuel_model(fuel_code)
+        if fuel_raw is None:
+            print(f"ERROR: Fuel '{fuel_code}' unknown.")
+            return {}
+        
+        fuel = FuelModel(
+            name=fuel_raw.code,
+            w_1h=fuel_raw.w_1h,
+            w_10h=fuel_raw.w_10h,
+            w_100h=fuel_raw.w_100h,
+            w_live_herb=fuel_raw.w_live_herb,
+            w_live_woody=fuel_raw.w_live_woody,
+            sigma_1h=fuel_raw.sigma_1h,
+            sigma_10h=fuel_raw.sigma_10h,
+            sigma_100h=fuel_raw.sigma_100h,
+            sigma_live_herb=fuel_raw.sigma_live_herb,
+            sigma_live_woody=fuel_raw.sigma_live_woody,
+            delta=fuel_raw.delta,
+            mx=fuel_raw.mx,
+            h_dead=fuel_raw.h_dead,
+            h_live=fuel_raw.h_live,
+            st=0.0555,
+            se=0.01
+        )
         moisture = MoistureInputs(
             m_1h=env.get("m_1h", 0.05),
             m_10h=env.get("m_10h", 0.06),
@@ -144,7 +169,7 @@ class PipelineRunner:
         }
 
     def _apply_corrector(self, rothermel_out: dict, features: dict) -> dict:
-        if self.corrector is None or self.scaler is None:
+        if self.corrector is None:
             return {
                 "ros_corrected": rothermel_out.get("ros_m_min", 0.0),
                 "delta_ros": 0.0,
@@ -153,6 +178,28 @@ class PipelineRunner:
 
         try:
             ros_rothermel = rothermel_out.get("ros_m_min", 0.0)
+
+            if self.corrector_type == "correcteur_final":
+                result = self.corrector.predict(
+                    fuel_id=features.get("fuel_model_code", "GR3"),
+                    wind_speed=features.get("wind_speed_ms", 3.0),
+                    moisture_1h=features.get("dfmc_percent", 5.0) / 100.0,  # convert percent to fraction
+                    slope_pct=features.get("slope_pct", 0.0),
+                    return_components=True
+                )
+                return {
+                    "ros_corrected": result["ros_burntrack"],
+                    "delta_ros": result["delta_mlp"],
+                    "uncertainty_std": 0.0,
+                }
+
+            if self.scaler is None:
+                return {
+                    "ros_corrected": ros_rothermel,
+                    "delta_ros": 0.0,
+                    "uncertainty_std": 0.0,
+                }
+
             x = np.array([[features.get(name, 0.0) for name in self.feature_names]], dtype=np.float64)
 
             if self.corrector_type in ("rf", "xgb"):
@@ -219,6 +266,7 @@ class PipelineRunner:
         dfmc = compute_dfmc(temp_air, vpd)
 
         features = {
+            "fuel_model_code": fuel_model,
             "ros_rothermel": rothermel_out.get("ros_m_min", 0.0),
             "temp_c": temp_air,
             "rh_percent": rh,
