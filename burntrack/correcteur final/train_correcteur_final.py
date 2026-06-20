@@ -43,7 +43,8 @@ from source.loss import WeightedMSELoss
 # Chemins données (relatifs au projet)
 DATA_DIR = os.path.join(SCRIPT_DIR, "..", "..", "data", "processed")
 REAL_DATA_PATH = os.path.join(DATA_DIR, "african_ground_truth.csv")
-SYNTH_DATA_PATH = os.path.join(DATA_DIR, "synthetic_dataset_v2.csv")
+SYNTH_DATA_PATH = os.path.join(DATA_DIR, "synthetic_dataset.csv")
+
 
 # Sorties
 CHECKPOINT_DIR = os.path.join(SCRIPT_DIR, "checkpoints")
