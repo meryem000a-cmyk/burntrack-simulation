@@ -1,45 +1,29 @@
 """
 cellular_automaton/rules.py
-============================
-Regles de propagation du feu -- BurnTrack.
+===========================
+Règles de propagation du feu pour l'Automate Cellulaire — BurnTrack.
 
-Architecture :
-  - PropagationRules appelle RothermelEngine pour chaque cellule source.
-  - Le ROS (m/min) est pondère directionnellement vers chaque voisin.
-  - Probabilite d'ignition par pas de temps : loi exponentielle p = 1-exp(-dt/t_ign).
-  - Extinction : duree de combustion = max(tau * facteur, min_burn_min).
-
-Note sur tau Rothermel :
-  Le temps de residence tau est tres court pour les herbes fines (0.1-0.3 min).
-  Le parametre min_burn_min garantit qu'une cellule reste BURNING assez longtemps
-  pour propager le feu meme avec un grand pas de temps (dt = 1 min).
+Implémente la discrétisation de la propagation basée sur le ROS (m/min),
+la distance physique entre cellules et l'intensité du vent et de la pente.
+Supporte également la simulation d'ensemble stochastique.
 """
 
 import numpy as np
-import sys, os
 from typing import Dict, List, Optional, Tuple
+import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from burntrack.engine.rothermel import (
-    RothermelEngine,
-    FuelModel as RothFuelModel,
-    MoistureInputs,
-    EnvironmentalConditions,
-    RothermelOutput,
-)
-from burntrack.engine.fuel_models import FuelModel as FMFuelModel
-
 from .grid import Grid, Cell, CellState
+from burntrack.engine.rothermel import (
+    RothermelEngine, FuelModel as RothFuelModel, 
+    MoistureInputs, EnvironmentalConditions, RothermelOutput
+)
 
 
-# ---------------------------------------------------------------------------
-# Conversion FuelModel
-# ---------------------------------------------------------------------------
-
-def _to_roth_fuel(fm: FMFuelModel) -> RothFuelModel:
-    """Adapte un FuelModel de fuel_models.py au format de RothermelEngine."""
+def _to_roth_fuel(fm) -> RothFuelModel:
+    """Convertit un FuelModel global en format attendu par RothermelEngine."""
     return RothFuelModel(
-        name=fm.name,
+        name=fm.code,
         w_1h=fm.w_1h,
         w_10h=fm.w_10h,
         w_100h=fm.w_100h,
@@ -59,193 +43,45 @@ def _to_roth_fuel(fm: FMFuelModel) -> RothFuelModel:
     )
 
 
-# ---------------------------------------------------------------------------
-# Utilitaires angulaires
-# ---------------------------------------------------------------------------
-
-def _angular_diff(a: float, b: float) -> float:
-    """Difference angulaire absolue entre deux azimuts (0-180 deg)."""
-    d = abs((b - a + 360.0) % 360.0)
-    return d if d <= 180.0 else 360.0 - d
-
-
-def _max_spread_direction(wind_dir_deg: float, slope_pct: float,
-                           aspect_deg: float) -> float:
-    """
-    Direction de propagation maximale (vent + pente combines).
-
-    Pour une pente forte, le feu monte le versant (aspect_deg).
-    Sinon il suit le vent (wind_dir_deg + 180).
-    Interpolation circulaire ponderee.
-    """
-    wind_prop = (wind_dir_deg + 180.0) % 360.0
-    if slope_pct < 5.0:
-        return wind_prop
-    w_slope = min(slope_pct / 30.0, 1.0)
-    w_wind  = 1.0 - w_slope
-    ax = w_wind * np.cos(np.radians(wind_prop)) + w_slope * np.cos(np.radians(aspect_deg))
-    ay = w_wind * np.sin(np.radians(wind_prop)) + w_slope * np.sin(np.radians(aspect_deg))
-    return float(np.degrees(np.arctan2(ay, ax)) % 360.0)
-
-
-# ---------------------------------------------------------------------------
-# PropagationRules
-# ---------------------------------------------------------------------------
-
 class PropagationRules:
     """
-    Regles de propagation du feu basees sur Rothermel v3.
-
-    Args:
-        stochastic            : True  -> probabiliste (recommande).
-                                False -> deterministe (p > 50%).
-        burn_duration_factor  : Multiplie tau Rothermel pour la duree de combustion.
-        min_burn_min          : Plancher de duree de combustion (min).
-                                Essentiel pour les herbes fines (tau ~ 0.1 min).
-        min_ros_m_min         : ROS minimal sous lequel la propagation est ignoree.
-        directional_exponent  : Puissance du cosinus de ponderation directionnelle.
-                                2.0 = propagation assez directionnelle (recommande).
-        back_fire_fraction    : Fraction du ROS max conservee dans la direction opposee.
-                                0.15 = 15% (feu de recul physiquement realiste).
+    Règles physiques régissant le passage du feu de cellule en cellule.
     """
 
-    def __init__(
-        self,
-        stochastic: bool = True,
-        burn_duration_factor: float = 4.0,
-        min_burn_min: float = 5.0,
-        min_ros_m_min: float = 0.01,
-        directional_exponent: float = 2.0,
-        back_fire_fraction: float = 0.15,
-    ):
-        self.engine               = RothermelEngine()
-        self.stochastic           = stochastic
-        self.burn_duration_factor = burn_duration_factor
-        self.min_burn_min         = min_burn_min
-        self.min_ros              = min_ros_m_min
-        self.dir_exp              = directional_exponent
-        self.back_fire            = back_fire_fraction
+    def __init__(self, use_corrector: bool = True):
+        self.engine = RothermelEngine()
+        self.use_corrector = use_corrector
 
-    # ------------------------------------------------------------------
-    # ROS directionnel
-    # ------------------------------------------------------------------
+    def compute_cell_ros(self, cell: Cell, grid: Grid) -> RothermelOutput:
+        """Calcule la vitesse de propagation brute (Rothermel v3) pour une cellule."""
+        fm_raw = grid.get_fuel(cell.fuel_code)
+        if fm_raw is None:
+            # Sécurité : ROS nul si pas de combustible
+            return RothermelOutput(ros=0.0, flame_length=0.0, fireline_intensity=0.0,
+                                   heat_per_unit_area=0.0, fuel_consumption=0.0,
+                                   spread_direction=0.0, phi_w=0.0, phi_s=0.0, phi_eff=0.0)
 
-    def _directional_ros(self, ros_max: float, max_spread_dir: float,
-                          spread_dir: float) -> float:
-        """
-        Ponderation directionnelle du ROS maximal.
-
-            ROS(theta) = ROS_max * [back_fire + (1-back_fire) * cos^n(delta/2)]
-
-        Garantit back_fire * ROS_max dans la direction opposee (feu de recul).
-        """
-        delta    = _angular_diff(max_spread_dir, spread_dir)
-        cos_half = max(0.0, np.cos(np.radians(delta / 2.0)))
-        weight   = self.back_fire + (1.0 - self.back_fire) * (cos_half ** self.dir_exp)
-        return ros_max * weight
-
-    def compute_cell_ros(self, src: Cell, fuel: RothFuelModel,
-                          spread_dir: float) -> float:
-        """
-        ROS de la cellule source vers la direction spread_dir.
-
-        1. Appelle Rothermel avec les conditions de la source.
-        2. Ponderation directionnelle selon l'ecart au vent+pente.
-
-        Args:
-            src        : Cellule BURNING source
-            fuel       : FuelModel converti pour RothermelEngine
-            spread_dir : Azimut vers le voisin cible (0=Nord, sens horaire)
-
-        Returns:
-            ROS directionnel en m/min
-        """
-        wind_prop_dir    = (src.wind_dir_deg + 180.0) % 360.0
-        angle_wind_slope = _angular_diff(wind_prop_dir, src.aspect_deg)
+        fuel = _to_roth_fuel(fm_raw)
+        
+        # Calcul de la direction relative vent/pente
+        wind_prop_dir = (cell.wind_dir_deg + 180.0) % 360.0
+        aspect = cell.aspect_deg
+        angle_wind_slope = abs((wind_prop_dir - aspect + 360.0) % 360.0)
+        if angle_wind_slope > 180.0:
+            angle_wind_slope = 360.0 - angle_wind_slope
 
         conditions = EnvironmentalConditions(
-            wind_speed=src.wind_speed_ms,
-            slope_pct=src.slope_pct,
-            angle_wind_slope=angle_wind_slope,
+            wind_speed=cell.wind_speed_ms,
+            slope_pct=cell.slope_pct,
+            angle_wind_slope=angle_wind_slope
         )
-        output = self.engine.compute(fuel, src.moisture, conditions)
 
-        ros_eff = max(output.ros + getattr(src, 'delta_ros', 0.0), 0.0)
+        return self.engine.compute(fuel, cell.moisture, conditions)
 
-        if ros_eff < self.min_ros:
-            return 0.0
-
-        max_dir = _max_spread_direction(src.wind_dir_deg, src.slope_pct, src.aspect_deg)
-        return self._directional_ros(ros_eff, max_dir, spread_dir)
-
-    # ------------------------------------------------------------------
-    # Probabilite d'ignition
-    # ------------------------------------------------------------------
-
-    def ignition_probability(self, ros_m_min: float, distance_m: float,
-                              dt_min: float) -> float:
+    def apply_step(self, grid: Grid, dt_min: float) -> List[Tuple[int, int]]:
         """
-        Probabilite d'ignition par pas de temps (loi exponentielle).
-
-            t_ign = distance / ROS
-            p     = 1 - exp(-dt / t_ign)
-
-        Returns:
-            float dans [0, 1]
-        """
-        if ros_m_min < self.min_ros:
-            return 0.0
-        t_ign = distance_m / ros_m_min
-        return float(np.clip(1.0 - np.exp(-dt_min / t_ign), 0.0, 1.0))
-
-    def _should_ignite(self, ros: float, dist: float, dt: float) -> bool:
-        p = self.ignition_probability(ros, dist, dt)
-        return bool(np.random.random() < p) if self.stochastic else p > 0.5
-
-    # ------------------------------------------------------------------
-    # Duree de combustion
-    # ------------------------------------------------------------------
-
-    def _burn_duration(self, tgt: Cell, grid: Grid) -> float:
-        """
-        Duree de combustion d'une cellule ciblee (min).
-
-        = max(tau_Rothermel * burn_duration_factor, min_burn_min)
-
-        Pour les herbes fines (tau ~ 0.1 min), min_burn_min domine.
-        Pour les combustibles lourds (tau ~ 5 min), le facteur domine.
-        """
-        fm_raw = grid.get_fuel(tgt.fuel_code)
-        if fm_raw is None:
-            return self.min_burn_min
-        fuel = _to_roth_fuel(fm_raw)
-        cond = EnvironmentalConditions(
-            wind_speed=tgt.wind_speed_ms,
-            slope_pct=tgt.slope_pct,
-            angle_wind_slope=0.0,
-        )
-        out = self.engine.compute(fuel, tgt.moisture, cond)
-        tau = out.residence_time if out.residence_time > 0 else 1.0
-        return max(tau * self.burn_duration_factor, self.min_burn_min)
-
-    # ------------------------------------------------------------------
-    # Pas de temps principal
-    # ------------------------------------------------------------------
-
-    def apply_step(self, grid: Grid, dt_min: float, current_time: float) -> int:
-        """
-        Applique un pas de temps a toute la grille (two-pass).
-
-        Pass 1 : identifier nouvelles ignitions et extinctions.
-        Pass 2 : appliquer les changements d'etat.
-
-        Args:
-            grid         : La grille
-            dt_min       : Duree du pas de temps (minutes)
-            current_time : Temps courant (min depuis t=0)
-
-        Returns:
-            Nombre de nouvelles ignitions ce pas
+        Avance l'état de la grille d'un pas de temps dt_min.
+        Retourne la liste des nouvelles cellules enflammées (i, j).
         """
         new_ignitions: List[Tuple[int, int]] = []
         ignited_set = set()
@@ -260,10 +96,11 @@ class PropagationRules:
                     continue
 
                 # Avancer le compteur de combustion
-                src.burn_elapsed += dt_min
-                if src.burn_elapsed >= src.burn_duration:
+                if src.burn_elapsed + dt_min >= src.burn_duration:
+                    src.burn_elapsed = src.burn_duration
                     to_extinguish.append((i, j))
                     continue   # ne propage plus depuis une cellule mourante
+                src.burn_elapsed += dt_min
 
                 # Fuel model de la source
                 fm_raw = grid.get_fuel(src.fuel_code)
@@ -279,24 +116,50 @@ class PropagationRules:
                     if (ni, nj) in ignited_set:
                         continue
 
-                    ros = self.compute_cell_ros(src, fuel, spread_dir)
-                    if self._should_ignite(ros, dist, dt_min):
-                        ignited_set.add((ni, nj))
-                        new_ignitions.append((ni, nj))
+                    # Calcul du ROS dans la direction du voisin
+                    out_src = self.compute_cell_ros(src, grid)
+                    ros_base = out_src.ros
 
-        # --- Pass 2 : extinctions ---
+                    # Ajout de la correction IA si activée
+                    ros_final = ros_base
+                    if self.use_corrector and src.delta_ros != 0.0:
+                        ros_final = max(0.0, ros_base + src.delta_ros)
+
+                    if ros_final <= 0.0:
+                        continue
+
+                    # Direction de propagation maximale vs direction du voisin
+                    max_dir = out_src.spread_direction
+                    theta = np.radians(spread_dir - max_dir)
+                    # Formule d'ellipse simplifiée pour le ROS directionnel
+                    ros_dir = ros_final * np.cos(theta)
+
+                    if ros_dir <= 0.0:
+                        continue
+
+                    # Temps requis pour franchir la distance entre les centres des deux cellules
+                    time_to_spread = dist / ros_dir  # en minutes
+
+                    # Probabilité de propagation sur ce pas de temps (dt)
+                    prob = 1.0 - np.exp(-dt_min / time_to_spread)
+
+                    if np.random.rand() < prob:
+                        new_ignitions.append((ni, nj))
+                        ignited_set.add((ni, nj))
+
+        # --- Pass 2 : Application des changements d'état ---
         for i, j in to_extinguish:
             grid.cells[i][j].state = CellState.BURNED
 
-        # --- Pass 2 : nouvelles ignitions ---
         for i, j in new_ignitions:
-            c = grid.cells[i][j]
-            c.state         = CellState.BURNING
-            c.ignition_time = current_time
-            c.burn_elapsed  = 0.0
-            c.burn_duration = self._burn_duration(c, grid)
+            cell = grid.cells[i][j]
+            cell.state = CellState.BURNING
+            cell.ignition_time = dt_min  # sera ajusté par le runner principal
+            # Calcul de sa propre durée de combustion pour sa future extinction
+            out = self.compute_cell_ros(cell, grid)
+            cell.burn_duration = max(1.0, out.fuel_consumption / (out.ros + 1e-5))
 
-        return len(new_ignitions)
+        return new_ignitions
 
 
 # ---------------------------------------------------------------------------
@@ -316,16 +179,6 @@ RF_FEATURE_NAMES = [
 class CorrectorV3Adapter:
     """
     Adaptateur pour le Corrector V3 (ML).
-
-    Pont entre le modele ML de correction et l'automate cellulaire.
-    Construit les 38 features brutes du CSV pour le RF — coherence
-    avec run_pipeline.py.
-
-    Usage:
-        rules = PropagationRules()
-        adapter = CorrectorV3Adapter(rules)
-        adapter.set_model(mon_modele_entraine, scaler)
-        adapter.apply_to_grid(grid)
     """
 
     def __init__(self, rules=None):
@@ -356,164 +209,104 @@ class CorrectorV3Adapter:
         if angle_wind_slope > 180.0:
             angle_wind_slope = 360.0 - angle_wind_slope
 
-        slope_pct = cell.slope_pct
-        slope_deg = getattr(cell, 'slope_deg', 0.0)
-        if slope_deg == 0.0 and slope_pct > 0.0:
-            slope_deg = np.degrees(np.arctan(slope_pct / 100.0))
-
-        beta = getattr(cell, '_beta', 0.001)
-        beta_opt = getattr(cell, '_beta_opt', 0.001)
-        beta_ratio = beta / max(beta_opt, 1e-6)
-
-        return {
-            "ros_rothermel": output.ros if output else getattr(cell, '_base_ros', 0.0),
+        # Valeurs environnementales par défaut
+        features = {
             "temp_c": temp_c,
             "rh_percent": rh_percent,
-            "wind_speed_ms": cell.wind_speed_ms,
+            "wind_speed_ms": getattr(cell, 'wind_speed_ms', 3.0),
             "vpd_kpa": vpd,
-            "slope_deg": slope_deg,
-            "slope_pct": slope_pct,
+            "slope_deg": np.degrees(np.arctan(getattr(cell, 'slope_pct', 0.0) / 100.0)),
+            "slope_pct": getattr(cell, 'slope_pct', 0.0),
             "angle_wind_slope": angle_wind_slope,
-            "w_total_kg_m2": getattr(cell, 'w_total_kg_m2', 0.5),
-            "w_dead_kg_m2": getattr(cell, 'w_dead_kg_m2', 0.3),
-            "w_live_kg_m2": getattr(cell, 'w_live_kg_m2', 0.2),
-            "delta_m": getattr(cell, 'delta', 0.3),
-            "sigma_m2_m3": getattr(cell, 'sigma', 1500.0),
-            "mx_percent": getattr(cell, 'mx', 20.0),
-            "h_dead_kj_kg": getattr(cell, 'h_dead', 18622.0),
-            "phi_w": output.phi_w if output else getattr(cell, '_phi_w', 0.0),
-            "phi_s": output.phi_s if output else getattr(cell, '_phi_s', 0.0),
-            "phi_eff": output.phi_eff if output else getattr(cell, '_phi_eff', 0.0),
-            "beta": beta,
-            "beta_opt": beta_opt,
-            "beta_ratio": beta_ratio,
-            "gamma": output.gamma if output else getattr(cell, '_gamma', 0.0),
-            "eta_M": output.eta_M if output else getattr(cell, '_eta_M', 0.0),
-            "eta_S": output.eta_S if output else getattr(cell, '_eta_S', 0.0),
-            "I_R_kW_m2": output.reaction_intensity if output else getattr(cell, '_I_R', 0.0),
-            "xi": output.xi if output else getattr(cell, '_xi', 0.0),
-            "tau_min": output.residence_time if output else getattr(cell, '_tau', 0.0),
-            "ndvi": getattr(cell, 'ndvi', 0.3),
-            "ndwi": getattr(cell, 'ndwi', -0.1),
-            "lst_c": getattr(cell, 'lst', temp_c + 10.0),
+            "ndvi": self.env_context.get("ndvi", 0.3),
+            "ndwi": self.env_context.get("ndwi", -0.1),
+            "lst_c": self.env_context.get("lst_c", temp_c + 5.0),
             "dfmc_percent": dfmc,
         }
 
-    def predict_delta_ros(self, cell: Cell, output: RothermelOutput) -> float:
-        if self.model is None:
-            return 0.0
-        try:
-            features = self._build_cell_features(cell, output)
-            x = self._features_to_array(features)
-            preds = self.model.predict(x)
-            if hasattr(preds[0], '__len__'):
-                return float(preds[0][0])
-            return float(preds[0])
-        except Exception:
-            return 0.0
+        # Valeurs physiques Rothermel
+        if output:
+            features.update({
+                "ros_rothermel": output.ros,
+                "phi_w": output.phi_w,
+                "phi_s": output.phi_s,
+                "phi_eff": output.phi_eff,
+                "I_R_kW_m2": output.fireline_intensity,
+            })
 
-    def _features_to_array(self, features: dict) -> np.ndarray:
-        x = np.array([[features.get(name, 0.0) for name in self.feature_names]], dtype=np.float64)
-        if self.scaler is not None:
-            x = self.scaler.transform(x)
-        return x
+        return features
 
     def apply_to_grid(self, grid: Grid):
-        if self.model is None:
+        if self.model is None or self.scaler is None:
             return
 
+        import torch
+
         all_features = []
-        cell_indices = []
+        cell_coords = []
 
         for i in range(grid.rows):
             for j in range(grid.cols):
-                c = grid.cells[i][j]
-                features = self._build_cell_features(c, output=None)
-                all_features.append(features)
-                cell_indices.append((i, j))
+                cell = grid.cell(i, j)
+                if cell.state == CellState.FIREBREAK:
+                    continue
+
+                out = None
+                if self.rules:
+                    out = self.rules.compute_cell_ros(cell, grid)
+
+                feat_dict = self._build_cell_features(cell, out)
+                vector = [feat_dict.get(name, 0.0) for name in self.feature_names]
+                all_features.append(vector)
+                cell_coords.append((i, j))
 
         if not all_features:
             return
 
-        x = np.array([[f.get(name, 0.0) for name in self.feature_names] for f in all_features], dtype=np.float64)
+        x = np.array(all_features, dtype=np.float32)
+        x_scaled = self.scaler.transform(x)
 
-        if self.scaler is not None:
-            x = self.scaler.transform(x)
+        with torch.no_grad():
+            x_t = torch.tensor(x_scaled, dtype=torch.float32)
+            preds = self.model(x_t).numpy()
 
-        try:
-            predictions = self.model.predict(x)
-        except Exception:
-            return
-
-        for idx, (i, j) in enumerate(cell_indices):
-            grid.cells[i][j].delta_ros = float(predictions[idx])
+        for idx, (i, j) in enumerate(cell_coords):
+            grid.cell(i, j).delta_ros = float(preds[idx][0])
 
 
 # ---------------------------------------------------------------------------
-# EnsembleSimulation — carte de brulage probabiliste
+# EnsembleSimulation — Simulation d'ensemble stochastique
 # ---------------------------------------------------------------------------
 
+@dataclass
 class PerturbationConfig:
-    """
-    Configuration des perturbations pour le mode ensemble.
-
-    Chaque parametre est defini comme (loi, *args) :
-        - ("gauss", mu, sigma)  : tirage gaussien
-        - ("uniform", low, high): tirage uniforme
-        - ("fixed", value)      : valeur fixe (pas de perturbation)
-        - ("lognormal", mu, sigma): tirage log-normal
-    """
-
-    def __init__(
-        self,
-        wind_speed: Tuple = ("gauss", 0.0, 0.2),
-        wind_dir: Tuple = ("gauss", 0.0, 15.0),
-        moisture_1h: Tuple = ("gauss", 0.0, 0.02),
-        fuel_load: Tuple = ("lognormal", 0.0, 0.1),
-    ):
-        self.wind_speed = wind_speed
-        self.wind_dir = wind_dir
-        self.moisture_1h = moisture_1h
-        self.fuel_load = fuel_load
+    """Paramètres stochastiques des distributions de perturbation."""
+    wind_speed: Tuple[str, float, float] = ("normal", 0.0, 0.20)
+    wind_dir: Tuple[str, float, float] = ("normal", 0.0, 15.0)
+    moisture_1h: Tuple[str, float, float] = ("normal", 0.0, 0.02)
+    fuel_load: Tuple[str, float, float] = ("normal", 0.0, 0.15)
 
 
 class EnsembleSimulation:
     """
-    Simulation d'ensemble — genere des cartes de brulage probabilistes.
-
-    Cree N realisations en perturbant les entrees (vent, humidite,
-    combustible), execute une simulation complete pour chaque tirage,
-    puis agrege les resultats en carte de probabilite de brulage.
-
-    Usage:
-        ens = EnsembleSimulation(base_grid, n_ensemble=100)
-        prob_map = ens.run(steps=120, dt=1.0, ignite_at=(25, 25))
+    Lance plusieurs simulations de propagation stochastiques en perturbant
+    les conditions aux limites pour obtenir une carte de probabilité.
     """
 
-    def __init__(
-        self,
-        base_grid: Grid,
-        n_ensemble: int = 50,
-        perturbation: Optional[PerturbationConfig] = None,
-        rules: Optional[PropagationRules] = None,
-        seed: Optional[int] = None,
-    ):
-        self.base_grid = base_grid
-        self.n = n_ensemble
-        self.perturb = perturbation or PerturbationConfig()
+    def __init__(self, grid: Grid, n_realizations: int = 50,
+                 rules: Optional[PropagationRules] = None,
+                 perturb: Optional[PerturbationConfig] = None,
+                 seed: Optional[int] = None):
+        self.base_grid = grid
+        self.n = n_realizations
         self.rules = rules
+        self.perturb = perturb if perturb else PerturbationConfig()
         self.rng = np.random.default_rng(seed)
 
-    # ------------------------------------------------------------------
-    # Perturbation
-    # ------------------------------------------------------------------
-
     def _sample_perturbation(self) -> dict:
-        """Tire un jeu de perturbations pour une realisation."""
-
-        def _sample(param: Tuple) -> float:
-            law, *args = param
-            if law == "gauss":
+        def _sample(p):
+            law, *args = p
+            if law == "normal":
                 return float(self.rng.normal(*args))
             elif law == "uniform":
                 return float(self.rng.uniform(*args))
@@ -551,10 +344,6 @@ class EnsembleSimulation:
 
         return g
 
-    # ------------------------------------------------------------------
-    # Execution
-    # ------------------------------------------------------------------
-
     def run(
         self,
         steps: int,
@@ -564,16 +353,6 @@ class EnsembleSimulation:
     ) -> np.ndarray:
         """
         Execute N simulations et retourne la carte de probabilite.
-
-        Args:
-            steps     : Nombre de pas de temps par realisation
-            dt        : Pas de temps (min)
-            ignite_at : Point d'ignition (row, col). None = utilise allumettes
-                        existantes dans base_grid.
-            verbose   : Affiche la progression
-
-        Returns:
-            np.ndarray (rows, cols) — probabilite de brulage dans [0, 1]
         """
         from .simulation import FireSimulation
 
@@ -628,10 +407,11 @@ class EnsembleSimulation:
                 seed=int(self.rng.integers(0, 2**31)),
             )
 
-            for pt in ignition_points:
-                sim.ignite(*pt)
+            for i, j in ignition_points:
+                sim.ignite(i, j)
 
             sim.run(steps, dt, verbose=False, stop_if_extinct=True)
+
             burn_count += (grid.state_array() >= 2).astype(np.float64)
 
             if verbose and (k + 1) % max(1, self.n // 10) == 0:
@@ -639,20 +419,3 @@ class EnsembleSimulation:
                 print(f"[Ensemble] {k+1:4d}/{self.n} ({pct:.0f}%)")
 
         return burn_count / self.n
-
-    # ------------------------------------------------------------------
-    # Statistiques
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def prob_summary(prob_map: np.ndarray) -> dict:
-        """Resume statistique d'une carte de probabilite."""
-        return {
-            "shape": prob_map.shape,
-            "mean_p": float(np.mean(prob_map)),
-            "median_p": float(np.median(prob_map)),
-            "p90": float(np.percentile(prob_map, 90)),
-            "p10": float(np.percentile(prob_map, 10)),
-            "high_risk_pct": float(np.mean(prob_map > 0.5) * 100),
-            "burned_area_pct": float(np.mean(prob_map > 0.05) * 100),
-        }
