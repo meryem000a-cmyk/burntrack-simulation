@@ -40,12 +40,12 @@ class Cell:
         aspect_deg     : Orientation de la pente (degrés, 0=Nord, sens horaire)
         elevation_m    : Altitude (m)
         wind_speed_ms  : Vitesse du vent local (m/s)
-    wind_dir_deg   : Direction d'où vient le vent (degrés, convention météo)
-    ignition_time  : Temps d'ignition en minutes depuis t=0, None si non brûlé
-    burn_duration  : Durée de combustion (min) — calculée par Rothermel à l'ignition
-    burn_elapsed   : Temps écoulé en combustion (min)
-    rh_percent     : Humidité relative de l'air (%) — requis pour le MLP
-    temp_c         : Température de l'air (°C) — requis pour le MLP
+        wind_dir_deg   : Direction d'où vient le vent (degrés, convention météo)
+        ignition_time  : Temps d'ignition en minutes depuis t=0, None si non brûlé
+        burn_duration  : Durée de combustion (min) — calculée par Rothermel à l'ignition
+        burn_elapsed   : Temps écoulé en combustion (min)
+        rh_percent     : Humidité relative de l'air (%) — requis pour le MLP
+        temp_c         : Température de l'air (°C) — requis pour le MLP
     """
     state: CellState = CellState.UNBURNED
     fuel_code: str = "GR2"
@@ -75,7 +75,6 @@ class Grid:
 
     # Voisinage de Moore (8 directions)
     # (delta_row, delta_col, angle_vers_voisin_en_degrés)
-    # angle = direction vers le voisin depuis la cellule source (0=Nord, sens horaire)
     NEIGHBOR_OFFSETS: List[Tuple[int, int, float]] = [
         (-1,  0,   0.0),   # Nord
         (-1,  1,  45.0),   # Nord-Est
@@ -97,10 +96,6 @@ class Grid:
         ]
         self._fuel_cache: Dict[str, FuelModel] = dict(ALL_FUEL_MODELS)
 
-    # ------------------------------------------------------------------
-    # Accès aux cellules
-    # ------------------------------------------------------------------
-
     def cell(self, row: int, col: int) -> Cell:
         return self.cells[row][col]
 
@@ -116,10 +111,6 @@ class Grid:
     ) -> Generator[Tuple[int, int, float, float], None, None]:
         """
         Génère les voisins valides de (row, col).
-
-        Yields:
-            (ni, nj, distance_m, direction_deg)
-            direction_deg : angle depuis (row,col) vers le voisin (0=Nord, sens horaire)
         """
         for di, dj, angle in self.NEIGHBOR_OFFSETS:
             ni, nj = row + di, col + dj
@@ -127,10 +118,6 @@ class Grid:
                 is_diag = (di != 0 and dj != 0)
                 dist = self.cell_size * (self.DIAG_SCALE if is_diag else 1.0)
                 yield ni, nj, dist, angle
-
-    # ------------------------------------------------------------------
-    # Statistiques
-    # ------------------------------------------------------------------
 
     def state_array(self) -> np.ndarray:
         """Matrice numpy des états entiers — pour visualisation et export."""
@@ -166,10 +153,6 @@ class Grid:
         )
         return burned / total
 
-    # ------------------------------------------------------------------
-    # Méthodes d'initialisation
-    # ------------------------------------------------------------------
-
     @classmethod
     def uniform(
         cls,
@@ -185,28 +168,19 @@ class Grid:
     ) -> "Grid":
         """
         Grille uniforme — terrain homogène pour tests et benchmarks.
-
-        Args:
-            fuel_code    : Code du fuel model (ex: "GR2", "SH5", "AF_MAQUIS_SEC")
-            moisture_1h  : Humidité des fins combustibles morts (fraction, ex: 0.06 = 6%)
-            wind_speed_ms: Vitesse du vent (m/s)
-            wind_dir_deg : Direction du vent (d'où il vient, convention météo)
-            slope_pct    : Pente (%)
-            aspect_deg   : Orientation de la pente (0=Nord)
         """
         g = cls(rows, cols, cell_size)
-        moisture = MoistureInputs(
-            m_1h=moisture_1h,
-            m_10h=moisture_1h + 0.01,
-            m_100h=moisture_1h + 0.02,
-            m_live_herb=min(moisture_1h * 6, 1.0),
-            m_live_woody=min(moisture_1h * 8, 1.0),
-        )
         for i in range(rows):
             for j in range(cols):
                 c = g.cells[i][j]
                 c.fuel_code = fuel_code
-                c.moisture = moisture
+                c.moisture = MoistureInputs(
+                    m_1h=moisture_1h,
+                    m_10h=moisture_1h + 0.01,
+                    m_100h=moisture_1h + 0.02,
+                    m_live_herb=min(moisture_1h * 6, 1.0),
+                    m_live_woody=min(moisture_1h * 8, 1.0),
+                )
                 c.wind_speed_ms = wind_speed_ms
                 c.wind_dir_deg = wind_dir_deg
                 c.slope_pct = slope_pct
@@ -216,20 +190,19 @@ class Grid:
     @classmethod
     def from_arrays(
         cls,
-        fuel_codes: np.ndarray,         # (rows, cols) dtype=str/object
-        slope_pct: np.ndarray,           # (rows, cols) float, %
-        aspect_deg: np.ndarray,          # (rows, cols) float, degrés
-        elevation_m: np.ndarray,         # (rows, cols) float, mètres
-        wind_speed: np.ndarray,          # (rows, cols) float, m/s
-        wind_dir: np.ndarray,            # (rows, cols) float, degrés
-        moisture_1h: np.ndarray,         # (rows, cols) float, fraction
+        fuel_codes: np.ndarray,
+        slope_pct: np.ndarray,
+        aspect_deg: np.ndarray,
+        elevation_m: np.ndarray,
+        wind_speed: np.ndarray,
+        wind_dir: np.ndarray,
+        moisture_1h: np.ndarray,
         cell_size: float = 30.0,
-        rh_percent: np.ndarray = None,   # (rows, cols) float, % — requis pour MLP
-        temp_c: np.ndarray = None,       # (rows, cols) float, °C — requis pour MLP
+        rh_percent: np.ndarray = None,
+        temp_c: np.ndarray = None,
     ) -> "Grid":
         """
         Crée une grille à partir d'arrays numpy (données raster GIS / ERA5).
-        Tous les arrays doivent avoir la même forme (rows, cols).
         """
         rows, cols = fuel_codes.shape
         g = cls(rows, cols, cell_size)
@@ -262,8 +235,7 @@ class Grid:
         row_end: int,   col_end: int,
     ):
         """
-        Trace un coupe-feu (cellules FIREBREAK) entre deux points.
-        Utilise l'algorithme de Bresenham pour une ligne discrète.
+        Trace un coupe-feu (cellules FIREBREAK) entre deux points (Bresenham).
         """
         r0, c0, r1, c1 = row_start, col_start, row_end, col_end
         dr = abs(r1 - r0)
