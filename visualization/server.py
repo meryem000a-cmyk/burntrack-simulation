@@ -547,38 +547,36 @@ class SimulationServer:
     # Boucle de simulation
     # ------------------------------------------------------------------
 
-    async def simulation_loop(self):
+     async def simulation_loop(self):
         """Boucle principale : avance la simulation et broadcast les frames."""
+        if self.grid and self.grid.burning_count() == 0:
+            self.running = False
+            await self._broadcast({"type": "simulation_end", "reason": "extinct"})
+            return
         while self.running and self.sim:
-            if self.grid and self.grid.burning_count() == 0 and self.step_count > 0:
+            if self.grid and self.grid.burning_count() == 0:
                 self.running = False
                 await self._broadcast({"type": "simulation_end", "reason": "extinct"})
                 break
-
             if self.step_count >= self.max_steps:
                 self.running = False
                 await self._broadcast({"type": "simulation_end", "reason": "max_steps"})
                 break
-
             # Executer un pas
             n_new = self.sim.step(self.dt)
             self.step_count += 1
-
             # Envoyer la frame
             frame = self._build_frame()
             await self._broadcast(frame)
-
             # Envoyer l'historique complet periodiquement
             if self.step_count % 5 == 0 or self.step_count == 1:
                 await self._broadcast({
                     "type": "stats_history",
                     **self.stats_history,
                 })
-
             # Attendre selon la vitesse
             delay = max(0.02, 0.5 / self.speed)
             await asyncio.sleep(delay)
-
         # Envoyer les stats finales
         if self.sim:
             await self._broadcast({
