@@ -737,6 +737,209 @@ class SimulationServer:
                     "regions": {},
                 }))
 
+        # ------------------------------------------------------------------
+        # Bouskoura Risk Map + Scenario Runner
+        # ------------------------------------------------------------------
+        elif cmd == "load_bouskoura":
+            await websocket.send(json.dumps({"type": "status", "message": "Construction de la grille Bouskoura..."}))
+            try:
+                sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+                from risk_map.bouskoura_risk import build_bouskoura_grid
+                from risk_map.ignition_selector import select_ignition_points, risk_zones
+                import copy
+
+                n_points  = msg.get("n_points", 12)
+                cell_size = msg.get("cell_size_m", 40.0)
+
+                base_grid, risk_arr, ndvi_arr, bk_meta = build_bouskoura_grid(
+                    cell_size_m=cell_size, seed=42
+                )
+                self.rules = PropagationRules(stochastic=True)
+                self.grid  = copy.deepcopy(base_grid)
+                self.sim   = FireSimulation(self.grid, rules=self.rules, seed=42)
+                self.step_count = 0
+                self._bouskoura_base_grid = base_grid   # pristine copy for scenario resets
+                self._bouskoura_risk  = risk_arr
+                self._bouskoura_meta  = bk_meta
+
+                forest_mask = (risk_arr > 0)
+                ignition_pts = select_ignition_points(
+                    risk_arr, forest_mask,
+                    n_points=n_points,
+                    min_cell_dist=6,
+                    lat_nw=bk_meta["lat_nw"],
+                    lon_nw=bk_meta["lon_nw"],
+                    cell_size_m=cell_size,
+                )
+                self._bouskoura_ignition_pts = ignition_pts
+                zones = risk_zones(risk_arr, forest_mask)
+
+                # NOTE: do NOT spread _build_frame() here — it adds "type":"frame"
+                # which would overwrite "type":"bouskoura_loaded"
+                await websocket.send(json.dumps({
+                    "type": "bouskoura_loaded",
+                    "meta": bk_meta,
+                    "risk_grid": risk_arr.tolist(),
+                    "ignition_points": ignition_pts,
+                    "risk_zones": zones,
+                }, default=str))
+            except Exception as e:
+                import traceback
+                await websocket.send(json.dumps({"type": "error", "message": str(e), "trace": traceback.format_exc()}))
+
+        elif cmd == "run_scenarios":
+            if not hasattr(self, "_bouskoura_ignition_pts") or not self._bouskoura_ignition_pts:
+                await websocket.send(json.dumps({"type": "error", "message": "Chargez d'abord la carte Bouskoura"}))
+                return
+            try:
+                import copy
+                import numpy as np_srv
+                from risk_map.ignition_selector import select_ignition_points
+
+                pts_live = self._bouskoura_ignition_pts   # top-K, streamed live
+                n_live   = len(pts_live)
+                dt       = msg.get("dt", 1.0)
+                steps    = msg.get("steps", 40)
+                results  = []
+                self.running = False
+
+                rows = self._bouskoura_meta["rows"]
+                cols = self._bouskoura_meta["cols"]
+                cell_size_m  = self._bouskoura_meta["cell_size_m"]
+                forest_cells = self._bouskoura_meta["forest_cells"]
+
+                # Accumulator for weighted burn probability (P_burn per cell)
+                burn_accum  = np_srv.zeros((rows, cols), dtype=np_srv.float32)
+                weight_sum  = 0.0
+
+                # ── Phase 1: live streaming scenarios (top-K ignition points) ──
+                for i, pt in enumerate(pts_live):
+                    await websocket.send(json.dumps({
+                        "type": "scenario_start",
+                        "current": i + 1,
+                        "total": n_live,
+                        "point": pt,
+                        "phase": "live",
+                    }))
+
+                    self.grid = copy.deepcopy(self._bouskoura_base_grid)
+                    self.sim  = FireSimulation(self.grid, rules=self.rules, seed=42 + i)
+                    self.sim.ignite(pt["row"], pt["col"])
+                    self.step_count = 0
+
+                    for s in range(steps):
+                        if self.grid.burning_count() == 0:
+                            break
+                        self.sim.step(dt)
+                        self.step_count += 1
+                        frame = self._build_frame()
+                        await websocket.send(json.dumps(frame, default=str))
+                        await asyncio.sleep(0)
+
+                    # Accumulate burn mask weighted by ignition risk
+                    state_arr = self.sim.snapshot()                        # numpy int array
+                    burned_mask = (state_arr == 2).astype(np_srv.float32)  # 1 where burned
+                    w = float(pt.get("risk_score", 0.5))
+                    burn_accum += w * burned_mask
+                    weight_sum += w
+
+                    burned_cells = int(burned_mask.sum())
+                    burned_ha    = burned_cells * cell_size_m ** 2 / 10_000
+                    burned_pct   = burned_cells / max(forest_cells, 1) * 100
+                    danger = "critique" if burned_ha > 50 else "élevé" if burned_ha > 20 else "moyen" if burned_ha > 5 else "faible"
+                    result = {
+                        "rank": i + 1,
+                        "row": pt["row"], "col": pt["col"],
+                        "risk_score": pt.get("risk_score", 0),
+                        "burned_ha": round(burned_ha, 2),
+                        "burned_pct": round(burned_pct, 2),
+                        "danger_level": danger,
+                    }
+                    results.append(result)
+                    await websocket.send(json.dumps({
+                        "type": "scenario_done",
+                        "current": i + 1,
+                        "total": n_live,
+                        "result": result,
+                    }, default=str))
+
+                # ── Phase 2: background scenarios (broader risk distribution, silent) ──
+                await websocket.send(json.dumps({
+                    "type": "status",
+                    "message": "Calcul des scénarios de fond (zones modérées)...",
+                }))
+                risk_arr    = self._bouskoura_risk
+                forest_mask = (risk_arr > 0)
+                # Select 20 points across full distribution with small min_dist
+                bg_pts = select_ignition_points(
+                    risk_arr, forest_mask,
+                    n_points=20,
+                    min_cell_dist=3,
+                    lat_nw=self._bouskoura_meta["lat_nw"],
+                    lon_nw=self._bouskoura_meta["lon_nw"],
+                    cell_size_m=cell_size_m,
+                )
+                # Exclude points already used in live phase
+                live_coords = {(p["row"], p["col"]) for p in pts_live}
+                bg_pts = [p for p in bg_pts if (p["row"], p["col"]) not in live_coords]
+
+                bg_steps = 20  # faster, enough to capture spread extent
+                for j, pt in enumerate(bg_pts):
+                    grid_bg = copy.deepcopy(self._bouskoura_base_grid)
+                    sim_bg  = FireSimulation(grid_bg, rules=self.rules, seed=100 + j)
+                    sim_bg.ignite(pt["row"], pt["col"])
+                    for s in range(bg_steps):
+                        if grid_bg.burning_count() == 0:
+                            break
+                        sim_bg.step(dt)
+                    state_arr   = sim_bg.snapshot()
+                    burned_mask = (state_arr == 2).astype(np_srv.float32)
+                    w = float(pt.get("risk_score", 0.3))
+                    burn_accum += w * burned_mask
+                    weight_sum += w
+                    await asyncio.sleep(0)  # stay responsive
+
+                # ── Compute final burn probability map ──
+                burn_prob = (burn_accum / max(weight_sum, 1e-9)).tolist()
+
+                # Sort live results and re-rank
+                results.sort(key=lambda r: r.get("burned_ha", 0), reverse=True)
+                for rank, r in enumerate(results):
+                    r["rank"] = rank + 1
+
+                await websocket.send(json.dumps({
+                    "type": "scenario_results",
+                    "results": results,
+                    "burn_probability_map": burn_prob,
+                    "n_scenarios_total": n_live + len(bg_pts),
+                }, default=str))
+
+            except Exception as e:
+                import traceback
+                await websocket.send(json.dumps({"type": "error", "message": str(e), "trace": traceback.format_exc()}))
+
+        elif cmd == "run_ensemble_scenario":
+            pt = msg.get("ignition_point")
+            if not pt or not hasattr(self, "grid") or not self.grid:
+                await websocket.send(json.dumps({"type": "error", "message": "Grille non initialisée"}))
+                return
+            await websocket.send(json.dumps({"type": "status", "message": f"Ensemble stochastique P{pt.get('rank','?')}..."}))
+            try:
+                from risk_map.scenario_runner import run_ensemble_scenario
+                n_real = msg.get("n_realizations", 25)
+                steps  = msg.get("steps", 60)
+                result = run_ensemble_scenario(
+                    self.grid, pt,
+                    n_realizations=n_real, steps=steps, seed=42
+                )
+                await websocket.send(json.dumps({
+                    "type": "ensemble_scenario_result",
+                    "result": result,
+                }, default=str))
+            except Exception as e:
+                import traceback
+                await websocket.send(json.dumps({"type": "error", "message": str(e), "trace": traceback.format_exc()}))
+
 
 def main():
     parser = argparse.ArgumentParser(description="BurnTrack WebSocket Visualization Server")
@@ -746,50 +949,48 @@ def main():
 
     server = SimulationServer(host=args.host, port=args.port)
 
-    # Configurer une grille par defaut
+    # Auto-configure with a default grid so the client has something to render immediately
     server.configure_grid({
         "rows": 50, "cols": 50, "cell_size_m": 30.0,
         "fuel_code": "GR4", "moisture_1h": 0.06,
-        "wind_speed_ms": 5.0, "wind_dir_deg": 270.0, "slope_pct": 0.0,
+        "wind_speed_ms": 5.0, "wind_dir_deg": 270.0,
+        "slope_pct": 0.0,
     })
-
-    print(f"=== BurnTrack Visualization Server ===")
-    print(f"WebSocket: ws://{args.host}:{args.port}")
-    print(f"HTTP:      http://localhost:{args.port}")
-    print(f"Grille:    {server.grid.rows}x{server.grid.cols} ({server.grid.cell_size}m)")
-    print(f"Fuel:      GR4 | Vent: 5.0 m/s Ouest | Humidite: 6%")
-    print()
-
-    # Servir aussi le fichier HTML via HTTP
-    html_path = os.path.join(os.path.dirname(__file__), "index.html")
+    # Auto-ignite centre
+    server.sim.ignite(25, 25)
 
     import mimetypes
-    static_dir = os.path.dirname(html_path)
 
     async def serve_http(reader, writer):
+        static_dir = os.path.dirname(__file__)
+        html_path  = os.path.join(static_dir, "index.html")
         try:
-            data = await reader.read(4096)
-            request_line = data.decode(errors="replace").split('\r\n')[0]
-            parts = request_line.split(' ')
-            if len(parts) < 2:
-                writer.write(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+            req = await reader.readline()
+            req = req.decode(errors="replace").strip()
+            # Drain remaining headers
+            while True:
+                line = await reader.readline()
+                if line in (b"\r\n", b"\n", b""):
+                    break
+
+            parts = req.split(" ")
+            if len(parts) < 2 or parts[0] != "GET":
+                writer.write(b"HTTP/1.1 405 Method Not Allowed\r\n\r\n")
                 await writer.drain()
                 writer.close()
                 return
 
-            path = parts[1].split('?')[0]   # strip query string
+            path = parts[1].split("?")[0]
 
-            if path == '/' or path == '/index.html':
+            if path in ("/", "/index.html"):
                 file_path = html_path
-            elif path == '/favicon.ico':
+            elif path == "/favicon.ico":
                 writer.write(b"HTTP/1.1 204 No Content\r\n\r\n")
                 await writer.drain()
                 writer.close()
                 return
             else:
-                # Serve any static file from the visualization directory
-                file_path = os.path.normpath(os.path.join(static_dir, path.lstrip('/')))
-                # Security: prevent directory traversal
+                file_path = os.path.normpath(os.path.join(static_dir, path.lstrip("/")))
                 if not file_path.startswith(os.path.abspath(static_dir)):
                     writer.write(b"HTTP/1.1 403 Forbidden\r\n\r\n")
                     await writer.drain()
@@ -802,8 +1003,8 @@ def main():
                 writer.close()
                 return
 
-            content_type = mimetypes.guess_type(file_path)[0] or 'application/octet-stream'
-            with open(file_path, 'rb') as f:
+            content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+            with open(file_path, "rb") as f:
                 body = f.read()
 
             response = (
@@ -825,14 +1026,12 @@ def main():
                 pass
 
     async def run_servers():
-        ws_server = await websockets.serve(server.handler, args.host, args.port)
+        ws_server  = await websockets.serve(server.handler, args.host, args.port)
         print(f"WebSocket actif sur ws://{args.host}:{args.port}")
-
-        http_port = args.port + 1
+        http_port  = args.port + 1
         http_server = await asyncio.start_server(serve_http, args.host, http_port)
         print(f"HTML accessible sur http://localhost:{http_port}")
-        print()
-        print(f"Ouvrez le navigateur sur http://localhost:{http_port}")
+        print(f"\nOuvrez le navigateur sur http://localhost:{http_port}")
 
         await asyncio.gather(
             ws_server.wait_closed(),

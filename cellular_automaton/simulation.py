@@ -85,8 +85,10 @@ class FireSimulation:
             c.state = CellState.BURNING
             c.ignition_time = self.current_time
             c.burn_elapsed = 0.0
-            # Durée initiale — on recalcule via les règles si disponible
-            c.burn_duration = self.rules._burn_duration(c, self.grid) if hasattr(self.rules, '_burn_duration') else 10.0
+            # Durée de combustion via le temps de résidence Rothermel (tau)
+            out = self.rules.compute_cell_ros(c, self.grid)
+            tau = getattr(out, 'tau', None) or getattr(out, 'residence_time', None)
+            c.burn_duration = max(10.0, float(tau)) if tau else 15.0
 
     def ignite_multiple(self, points: List[Tuple[int, int]]):
         """Allume plusieurs cellules simultanément."""
@@ -104,7 +106,8 @@ class FireSimulation:
         Returns:
             Nombre de nouvelles ignitions ce pas.
         """
-        n_new = self.rules.apply_step(self.grid, dt, self.current_time)
+        new_ignitions = self.rules.apply_step(self.grid, dt)
+        n_new = len(new_ignitions) if isinstance(new_ignitions, list) else int(new_ignitions)
         self.current_time += dt
         self.step_count += 1
         self.stats.record(
@@ -186,8 +189,4 @@ class FireSimulation:
                 c = self.grid.cells[i][j]
                 if c.state != CellState.FIREBREAK:
                     c.state = CellState.UNBURNED
-                    c.ignition_time = None
-                    c.burn_elapsed = 0.0
-        self.current_time = 0.0
-        self.step_count = 0
-        self.stats = SimulationStats()
+        

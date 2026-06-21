@@ -3,1074 +3,887 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BurnTrack — Visualisation Automate Cellulaire</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<title>BurnTrack — Bouskoura Fire Risk</title>
 <style>
   :root {
-    --bg: #0a0e14; --bg2: #131922; --bg3: #1c2333; --border: #2a3142;
-    --text: #e0e6f0; --text2: #7a8599; --accent: #4da6ff; --accent2: #3fb950;
-    --fire: #ff4d3a; --amber: #e6a817; --purple: #b07aff;
+    --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;
+    --text:#e6edf3;--text2:#7d8590;--accent:#58a6ff;--green:#3fb950;
+    --fire:#ff4d3a;--amber:#e6a817;--orange:#ff7c43;--purple:#b07aff;
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Consolas', 'Courier New', monospace; background: var(--bg); color: var(--text); overflow: hidden; height: 100vh; }
-
-  .dashboard { display: grid; grid-template-columns: 1fr 320px; grid-template-rows: 50px 1fr 200px; height: 100vh; gap: 1px; background: var(--border); }
-  .header { grid-column: 1/-1; background: var(--bg2); display: flex; align-items: center; padding: 0 16px; gap: 12px; font-size: 13px; }
-  .header h1 { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: 1px; text-transform: uppercase; }
-  .header .stats-bar { display: flex; gap: 14px; margin-left: auto; }
-  .header .stat { display: flex; align-items: center; gap: 4px; }
-  .header .stat .label { color: var(--text2); font-size: 11px; text-transform: uppercase; }
-  .header .stat .value { font-weight: 700; font-variant-numeric: tabular-nums; }
-  .header .stat .value.fire { color: var(--fire); }
-  .header .stat .value.amber { color: var(--amber); }
-  .header .stat .value.green { color: var(--accent2); }
-
-  .main-area { background: var(--bg); position: relative; overflow: hidden; display: flex; flex-direction: column; }
-  .toolbar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 6px 10px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
-  .toolbar button { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; font-family: inherit; transition: all 0.12s; }
-  .toolbar button:hover { background: var(--border); border-color: var(--accent); }
-  .toolbar button.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
-  .toolbar button.danger { border-color: var(--fire); color: var(--fire); }
-  .toolbar button.danger:hover { background: var(--fire); color: #fff; }
-  .toolbar .sep { width: 1px; height: 20px; background: var(--border); }
-  .toolbar label { font-size: 11px; color: var(--text2); display: flex; align-items: center; gap: 3px; }
-  .toolbar input[type=range] { width: 70px; accent-color: var(--accent); }
-  .toolbar select { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 3px 6px; border-radius: 3px; font-size: 11px; font-family: inherit; }
-
-  .canvas-wrap { flex: 1; position: relative; cursor: crosshair; overflow: hidden; background: #080c12; }
-  .canvas-wrap canvas { position: absolute; top: 0; left: 0; }
-  #gridCanvas { z-index: 1; }
-  #overlayCanvas { z-index: 2; pointer-events: none; }
-
-  .right-panel { background: var(--bg2); border-left: 1px solid var(--border); overflow-y: auto; font-size: 12px; }
-  .right-panel::-webkit-scrollbar { width: 4px; }
-  .right-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-  .panel-section { padding: 10px; border-bottom: 1px solid var(--border); }
-  .panel-section h3 { font-size: 10px; color: var(--accent); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
-  .panel-section .row { display: flex; justify-content: space-between; padding: 2px 0; }
-  .panel-section .row .k { color: var(--text2); }
-  .panel-section .row .v { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
-
-  .bottom-panel { grid-column: 1/-1; background: var(--bg2); display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); }
-  .chart-cell { background: var(--bg2); padding: 6px; position: relative; }
-  .chart-cell canvas { width: 100% !important; height: 100% !important; }
-
-  .legend { display: flex; gap: 10px; padding: 4px 10px; background: var(--bg3); border-top: 1px solid var(--border); font-size: 10px; flex-wrap: wrap; }
-  .legend-item { display: flex; align-items: center; gap: 3px; }
-  .legend-swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(255,255,255,0.08); }
-
-  .tooltip { position: absolute; background: rgba(19,25,34,0.96); border: 1px solid var(--accent); border-radius: 4px; padding: 6px 10px; font-size: 11px; pointer-events: none; z-index: 100; max-width: 280px; box-shadow: 0 4px 16px rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
-  .tooltip .tt-title { font-weight: 700; color: var(--accent); margin-bottom: 3px; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
-  .tooltip .tt-row { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; }
-  .tooltip .tt-k { color: var(--text2); }
-  .tooltip .tt-v { font-weight: 600; }
-
-  .connection-badge { padding: 3px 8px; border-radius: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
-  .connection-badge.connected { background: rgba(63,185,80,0.15); color: var(--accent2); }
-  .connection-badge.disconnected { background: rgba(255,77,58,0.15); color: var(--fire); }
-
-  .overlay-selector { display: flex; gap: 3px; flex-wrap: wrap; }
-  .overlay-btn { padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border); background: var(--bg3); color: var(--text2); font-size: 10px; cursor: pointer; font-family: inherit; }
-  .overlay-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
-
-  .param-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-  .param-panel label { font-size: 10px; color: var(--text2); }
-  .param-panel input, .param-panel select { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 3px 5px; border-radius: 3px; font-size: 11px; font-family: inherit; width: 100%; }
-
-  @keyframes fireGlow { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.3); } }
-  .fire-cell { animation: fireGlow 0.6s ease-in-out infinite; }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column;}
+  header{height:48px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:16px;flex-shrink:0;}
+  .logo{font-size:16px;font-weight:700;color:var(--fire);letter-spacing:2px;}
+  .badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:12px;text-transform:uppercase;letter-spacing:1px;}
+  .badge.online{background:rgba(63,185,80,.15);color:var(--green);border:1px solid rgba(63,185,80,.3);}
+  .badge.offline{background:rgba(255,77,58,.15);color:var(--fire);border:1px solid rgba(255,77,58,.3);}
+  #liveStats{margin-left:auto;display:flex;gap:20px;font-size:13px;}
+  .stat-item{display:flex;align-items:center;gap:5px;}
+  .stat-item .lbl{color:var(--text2);font-size:11px;}
+  .stat-item .val{font-weight:700;font-variant-numeric:tabular-nums;}
+  .val.fire-val{color:var(--fire);}
+  .val.amber-val{color:var(--amber);}
+  .main{flex:1;display:flex;overflow:hidden;}
+  .canvas-wrap{flex:1;position:relative;background:#080c10;overflow:hidden;}
+  #riskCanvas{position:absolute;top:0;left:0;z-index:1;}
+  #fireCanvas{position:absolute;top:0;left:0;z-index:2;pointer-events:none;}
+  #dotCanvas{position:absolute;top:0;left:0;z-index:3;pointer-events:none;}
+  .canvas-overlay-msg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;z-index:10;pointer-events:none;}
+  .canvas-overlay-msg .big-icon{font-size:48px;}
+  .canvas-overlay-msg p{color:var(--text2);font-size:14px;margin-top:8px;}
+  .sidebar{width:320px;flex-shrink:0;background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+  .sb-section{padding:16px;border-bottom:1px solid var(--border);}
+  .sb-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--accent);margin-bottom:10px;}
+  .btn-primary{width:100%;padding:12px;background:linear-gradient(135deg,#ff6b35,#ff4d3a);border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:1px;transition:all .15s;font-family:inherit;}
+  .btn-primary:hover{filter:brightness(1.15);transform:translateY(-1px);}
+  .btn-primary:disabled{background:var(--bg3);color:var(--text2);cursor:not-allowed;transform:none;filter:none;}
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;}
+  .stat-box{background:var(--bg3);border-radius:6px;padding:8px;border:1px solid var(--border);}
+  .stat-box .sb-val{font-size:18px;font-weight:700;color:var(--accent);}
+  .stat-box .sb-lbl{font-size:10px;color:var(--text2);margin-top:2px;}
+  .risk-zones{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
+  .rz-row{display:flex;align-items:center;gap:6px;font-size:11px;}
+  .rz-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .rz-label{color:var(--text2);width:70px;}
+  .rz-bar-wrap{flex:1;background:var(--bg3);border-radius:3px;height:6px;}
+  .rz-bar{height:100%;border-radius:3px;}
+  .rz-pct{width:36px;text-align:right;font-variant-numeric:tabular-nums;}
+  #progressSection{display:none;}
+  .spinner-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .spinner{width:20px;height:20px;border:3px solid var(--border);border-top-color:var(--fire);border-radius:50%;animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .progress-bar-wrap{background:var(--bg3);border-radius:4px;height:6px;overflow:hidden;}
+  .progress-bar{height:100%;background:linear-gradient(90deg,var(--fire),var(--amber));border-radius:4px;transition:width .3s;width:0%;}
+  #resultsSection{display:none;flex:1;overflow:hidden;flex-direction:column;}
+  #resultsScroll{flex:1;overflow-y:auto;padding:12px;}
+  #resultsScroll::-webkit-scrollbar{width:4px;}
+  #resultsScroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+  .result-card{background:var(--bg3);border-radius:8px;padding:10px;margin-bottom:8px;border-left:3px solid transparent;}
+  .result-card.active{border-left-color:var(--accent) !important;outline:1px solid var(--accent);}
+  .rc-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+  .rc-rank{font-size:11px;font-weight:700;}
+  .rc-danger{font-size:9px;font-weight:700;padding:2px 6px;border-radius:10px;text-transform:uppercase;letter-spacing:.5px;}
+  .rc-ha{font-size:20px;font-weight:700;}
+  .rc-pct{font-size:11px;color:var(--text2);margin-left:6px;}
+  .rc-bar-wrap{background:var(--bg);border-radius:3px;height:5px;margin:5px 0;overflow:hidden;}
+  .rc-bar{height:100%;border-radius:3px;}
+  .rc-actions{display:flex;gap:6px;margin-top:6px;}
+  .btn-watch{flex:1;padding:5px;background:transparent;border:1px solid var(--accent);color:var(--accent);border-radius:5px;font-size:11px;cursor:pointer;font-family:inherit;transition:all .12s;}
+  .btn-watch:hover{background:rgba(88,166,255,.15);}
+  .btn-ensemble{flex:1;padding:5px;background:transparent;border:1px solid var(--purple);color:var(--purple);border-radius:5px;font-size:11px;cursor:pointer;font-family:inherit;transition:all .12s;}
+  .btn-ensemble:hover{background:rgba(176,122,255,.15);}
+  #playbackSection{display:none;padding:12px 16px;border-top:1px solid var(--border);background:var(--bg);flex-shrink:0;}
+  .pb-title{font-size:10px;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;}
+  .pb-controls{display:flex;gap:6px;align-items:center;}
+  .pb-btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;cursor:pointer;font-family:inherit;transition:all .12s;}
+  .pb-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .pb-btn.playing{background:var(--fire);border-color:var(--fire);color:#fff;}
+  .pb-label{font-size:11px;color:var(--text2);margin-left:auto;font-variant-numeric:tabular-nums;}
+  .legend{display:flex;gap:12px;padding:6px 16px;background:var(--bg2);border-top:1px solid var(--border);font-size:10px;color:var(--text2);flex-shrink:0;flex-wrap:wrap;}
+  .leg-item{display:flex;align-items:center;gap:4px;}
+  .leg-swatch{width:10px;height:10px;border-radius:2px;}
+  #statusBar{height:28px;background:var(--bg3);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 16px;font-size:11px;color:var(--text2);flex-shrink:0;}
+  /* 2D Leaflet overlay */
+  #overlay2d{display:none;position:fixed;inset:0;background:#fff;z-index:999;flex-direction:column;}
+  #overlay2d.active{display:flex;}
+  #overlay2d .ov-header{height:48px;background:#f6f8fa;border-bottom:1px solid #d0d7de;display:flex;align-items:center;padding:0 20px;gap:12px;flex-shrink:0;}
+  #overlay2d .ov-title{font-size:14px;font-weight:700;color:#cf222e;letter-spacing:1px;}
+  #overlay2d .ov-sub{font-size:11px;color:#57606a;}
+  #overlay2d .ov-close{margin-left:auto;padding:6px 16px;background:#fff;border:1px solid #d0d7de;color:#24292f;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;}
+  #overlay2d .ov-close:hover{border-color:#cf222e;color:#cf222e;}
+  #leaflet-container{flex:1;position:relative;}
+  .lf-legend{position:absolute;bottom:24px;left:16px;background:rgba(255,255,255,.96);border:1px solid #d0d7de;border-radius:8px;padding:12px 16px;z-index:1000;font-size:11px;font-family:'Segoe UI',sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+  .lf-legend .ll-title{font-size:10px;font-weight:700;color:#57606a;letter-spacing:1px;margin-bottom:8px;text-transform:uppercase;}
+  .lf-legend .ll-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+  .lf-legend .ll-row:last-child{margin-bottom:0;}
+  .ll-swatch{width:20px;height:12px;border-radius:2px;border:1px solid rgba(0,0,0,.12);}
+  /* 3D overlay */
+  /* 3D overlay */
+  #overlay3d{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:1000;flex-direction:column;}
+  #overlay3d.active{display:flex;}
+  #overlay3d .ov-header{height:48px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:12px;flex-shrink:0;}
+  #overlay3d .ov-title{font-size:14px;font-weight:700;color:var(--fire);letter-spacing:1px;}
+  #overlay3d .ov-sub{font-size:11px;color:var(--text2);}
+  #overlay3d .ov-close{margin-left:auto;padding:6px 16px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;}
+  #overlay3d .ov-close:hover{border-color:var(--fire);color:var(--fire);}
+  #three-container{flex:1;position:relative;overflow:hidden;}
+  .map3d-legend{position:absolute;bottom:16px;left:16px;background:rgba(13,17,23,.85);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:11px;pointer-events:none;}
+  .map3d-legend .ml-row{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+  .map3d-legend .ml-row:last-child{margin-bottom:0;}
+  .ml-swatch{width:14px;height:8px;border-radius:2px;}
+  .map3d-hint{position:absolute;top:12px;right:12px;background:rgba(13,17,23,.75);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:10px;color:var(--text2);pointer-events:none;}
+  .btn-3d{width:100%;padding:10px;background:linear-gradient(135deg,#7c3aed,#b07aff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.5px;transition:all .15s;font-family:inherit;margin-top:8px;}
+  .btn-3d:hover{filter:brightness(1.15);transform:translateY(-1px);}
+  .btn-2d{width:100%;padding:10px;background:linear-gradient(135deg,#0f5132,#2ea043);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.5px;transition:all .15s;font-family:inherit;margin-top:6px;}
+  .btn-2d:hover{filter:brightness(1.15);transform:translateY(-1px);}
+  #prob2dLegend{display:none;position:absolute;top:12px;left:12px;background:rgba(13,17,23,.92);border:1px solid var(--border);border-radius:8px;padding:12px 16px;z-index:5;font-size:11px;}
+  #prob2dLegend .pl-title{font-size:10px;font-weight:700;color:var(--text2);letter-spacing:1px;margin-bottom:8px;}
+  #prob2dLegend .pl-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+  #prob2dLegend .pl-row:last-child{margin-bottom:0;}
+  .pl-swatch{width:18px;height:12px;border-radius:2px;flex-shrink:0;}
+  #btnRestoreRisk{display:none;margin-top:6px;width:100%;padding:7px;background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit;}
+  #btnRestoreRisk:hover{border-color:var(--accent);color:var(--accent);}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
 </head>
 <body>
-
-<div class="dashboard">
-  <div class="header">
-    <h1>BurnTrack</h1>
-    <span id="connectionBadge" class="connection-badge disconnected">OFFLINE</span>
-    <div class="stats-bar">
-      <div class="stat"><span class="label">T=</span><span class="value" id="hdrTime">0.0 min</span></div>
-      <div class="stat"><span class="label">Step</span><span class="value" id="hdrStep">0</span></div>
-      <div class="stat"><span class="label">Fire</span><span class="value fire" id="hdrBurning">0</span></div>
-      <div class="stat"><span class="label">Burned</span><span class="value amber" id="hdrBurned">0%</span></div>
-      <div class="stat"><span class="label">ROS</span><span class="value green" id="hdrRos">0 m/min</span></div>
-      <div class="stat"><span class="label">Intensity</span><span class="value" id="hdrIntensity">0 kW/m</span></div>
+<header>
+  <span class="logo">&#128293; BURNTRACK</span>
+  <span id="badge" class="badge offline">OFFLINE</span>
+  <div id="liveStats">
+    <div class="stat-item"><span class="lbl">T</span><span class="val" id="statTime">0 min</span></div>
+    <div class="stat-item"><span class="lbl">FEU</span><span class="val fire-val" id="statBurning">0</span></div>
+    <div class="stat-item"><span class="lbl">BRULE</span><span class="val amber-val" id="statBurned">0%</span></div>
+    <div class="stat-item"><span class="lbl">ROS</span><span class="val" id="statRos">0 m/min</span></div>
+  </div>
+</header>
+<div class="main">
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="riskCanvas"></canvas>
+    <canvas id="fireCanvas"></canvas>
+    <canvas id="dotCanvas"></canvas>
+    <div id="prob2dLegend"></div>
+    <div class="canvas-overlay-msg" id="canvasMsg">
+      <div class="big-icon">&#127794;</div>
+      <p>Chargez la foret de Bouskoura pour commencer</p>
     </div>
   </div>
-
-  <div class="main-area">
-    <div class="toolbar">
-      <button id="btnPlay" onclick="togglePlay()">PLAY</button>
-      <button onclick="doStep()">STEP</button>
-      <button class="danger" onclick="doReset()">RESET</button>
-      <div class="sep"></div>
-      <label>Speed <input type="range" id="speedSlider" min="0.25" max="5" step="0.25" value="1" oninput="setSpeed(this.value)"><span id="speedLabel">1.0x</span></label>
-      <label>dt <input type="range" id="dtSlider" min="0.5" max="5" step="0.5" value="1" oninput="setDt(this.value)"><span id="dtLabel">1 min</span></label>
-      <div class="sep"></div>
-      <label>View:</label>
-      <div class="overlay-selector">
-        <button class="overlay-btn active" onclick="setOverlay('state')">State</button>
-        <button class="overlay-btn" onclick="setOverlay('ros')">ROS</button>
-        <button class="overlay-btn" onclick="setOverlay('intensity')">Intensity</button>
-        <button class="overlay-btn" onclick="setOverlay('flame')">Flame</button>
-        <button class="overlay-btn" onclick="setOverlay('burn_prob')">P_burn</button>
-        <button class="overlay-btn" onclick="setOverlay('slope')">Slope</button>
-        <button class="overlay-btn" onclick="setOverlay('wind_speed')">Wind</button>
-        <button class="overlay-btn" onclick="setOverlay('moisture')">Moisture</button>
-        <button class="overlay-btn" onclick="setOverlay('elevation')">Elev</button>
-      </div>
-      <div class="sep"></div>
-      <label>Risk:</label>
-      <div class="overlay-selector">
-        <button class="overlay-btn risk-btn" onclick="setOverlay('combined_risk')" style="border-color:#ff6b35;">Combined</button>
-        <button class="overlay-btn risk-btn" onclick="setOverlay('fire_risk')" style="border-color:#ff4d3a;">Fire</button>
-        <button class="overlay-btn risk-btn" onclick="setOverlay('terrain_risk')" style="border-color:#8b6914;">Terrain</button>
-        <button class="overlay-btn risk-btn" onclick="setOverlay('fuel_risk')" style="border-color:#2d8b2d;">Fuel</button>
-        <button class="overlay-btn risk-btn" onclick="setOverlay('wind_risk')" style="border-color:#4da6ff;">Wind</button>
-        <button class="overlay-btn risk-btn" onclick="setOverlay('moisture_risk')" style="border-color:#b07aff;">Moisture</button>
-      </div>
-      <div class="sep"></div>
-      <label><input type="checkbox" id="chkHex" checked onchange="toggleHex()"> Hex</label>
-      <label><input type="checkbox" id="chkArrows" checked onchange="renderGrid()"> Arrows</label>
-      <label><input type="checkbox" id="chkContours" checked onchange="renderGrid()"> Contours</label>
-      <label><input type="checkbox" id="chkNumbers" checked onchange="renderGrid()"> Numbers</label>
+  <div class="sidebar">
+    <div class="sb-section" id="loadSection">
+      <div class="sb-title">Foret de Bouskoura</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:12px;">Carte de risque incendie - Casablanca, Maroc<br>Methode Assali et al. 2016</p>
+      <button class="btn-primary" id="btnLoad" onclick="loadBouskoura()">&#127794; CHARGER LA FORET</button>
     </div>
-    <div class="canvas-wrap" id="canvasWrap">
-      <canvas id="gridCanvas"></canvas>
-      <canvas id="overlayCanvas"></canvas>
-      <div id="tooltip" class="tooltip" style="display:none;"></div>
-    </div>
-    <div class="legend" id="legend">
-      <div class="legend-item"><div class="legend-swatch" style="background:#2d5a27;"></div>Unburned</div>
-      <div class="legend-item"><div class="legend-swatch" style="background:#1a8c3c;"></div>Active Fire</div>
-      <div class="legend-item"><div class="legend-swatch" style="background:#5c3a1e;"></div>Burned</div>
-      <div class="legend-item"><div class="legend-swatch" style="background:#1a3a6e;"></div>Firebreak</div>
-      <div class="legend-item"><div class="legend-swatch" style="border:1px dashed #555;"></div>Contour</div>
-      <div class="legend-item"><div class="legend-swatch" style="background:none;border:1px solid #4a9;">&#x2192;</div>Spread Vector</div>
-    </div>
-  </div>
-
-  <div class="right-panel">
-    <div class="panel-section">
-      <h3>Simulation Config</h3>
-      <div class="param-panel">
-        <label>Region
-          <select id="selRegion" onchange="loadRealData()">
-            <option value="kruger">Kruger (480 pts)</option>
-            <option value="eastern_cape">Eastern Cape (320)</option>
-            <option value="zambia_miombo">Zambia Miombo (200)</option>
-            <option value="fynbos">Fynbos (160)</option>
-            <option value="burkina_faso">Burkina Faso (160)</option>
-            <option value="madagascar">Madagascar (120)</option>
-            <option value="uniform">Uniform Grid</option>
-          </select>
-        </label>
-        <label>Grid <input type="number" id="cfgRows" value="40" min="10" max="100"></label>
-        <label>Cell (m) <input type="number" id="cfgCellSize" value="10" min="5" max="100"></label>
-        <label>Fuel
-          <select id="cfgFuel">
-            <option value="AF_MIOMBO">AF_MIOMBO</option>
-            <option value="AF_ACACIA_SAVANNA">AF_ACACIA_SAVANNA</option>
-            <option value="AF_FYNBOS">AF_FYNBOS</option>
-            <option value="AF_STEPPE">AF_STEPPE</option>
-            <option value="GR4">GR4</option>
-            <option value="SH5">SH5</option>
-          </select>
-        </label>
-        <label>Wind (m/s) <input type="number" id="cfgWind" value="5" min="0" max="30" step="0.5"></label>
-        <label>Wind Dir <input type="number" id="cfgWindDir" value="270" min="0" max="360" step="15"></label>
-        <label>Slope % <input type="number" id="cfgSlope" value="0" min="0" max="80" step="1"></label>
-        <label>Moisture <input type="number" id="cfgMoisture" value="0.06" min="0.01" max="0.5" step="0.01"></label>
+    <div class="sb-section" id="forestSection" style="display:none">
+      <div class="sb-title">Statistiques foret</div>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="sb-val" id="fsHa">-</div><div class="sb-lbl">Hectares foret</div></div>
+        <div class="stat-box"><div class="sb-val" id="fsCells">-</div><div class="sb-lbl">Cellules</div></div>
+        <div class="stat-box"><div class="sb-val" id="fsGrid">-</div><div class="sb-lbl">Grille (lignes x cols)</div></div>
+        <div class="stat-box"><div class="sb-val" id="fsCellSize">-</div><div class="sb-lbl">Taille cellule</div></div>
       </div>
-      <div style="margin-top:6px;">
-        <button onclick="loadRealData()" style="width:100%;padding:5px;background:var(--accent);color:#000;border:none;border-radius:3px;cursor:pointer;font-weight:700;font-family:inherit;">LOAD REAL DATA</button>
-        <button onclick="loadUniformGrid()" style="width:100%;padding:5px;margin-top:4px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:3px;cursor:pointer;font-family:inherit;">UNIFORM GRID</button>
+      <div class="sb-title">Zones de risque</div>
+      <div class="risk-zones" id="riskZones"></div>
+      <div style="font-size:11px;color:var(--text2)" id="ignPtsLabel"></div>
+    </div>
+    <div class="sb-section" id="runSection" style="display:none">
+      <button class="btn-primary" id="btnRun" onclick="runScenarios()">&#9654; LANCER LES SIMULATIONS</button>
+    </div>
+    <div class="sb-section" id="progressSection">
+      <div class="sb-title">Simulations en cours</div>
+      <div class="spinner-row"><div class="spinner"></div><span id="progressMsg" style="font-size:12px;">Calcul des scenarios...</span></div>
+      <div class="progress-bar-wrap"><div class="progress-bar" id="progressBar"></div></div>
+    </div>
+    <div id="resultsSection">
+      <div class="sb-section" style="padding-bottom:8px;">
+        <div class="sb-title">Resultats — classes par superficie brulee</div>
+        <div style="font-size:11px;color:var(--text2)" id="resultsSubtitle"></div>
+        <button class="btn-3d" id="btn3d" style="display:none" onclick="open3DMap()">&#127760; CARTE 3D — Probabilite d'incendie</button>
+        <button class="btn-2d" id="btn2d" style="display:none" onclick="show2DProbMap()">&#128205; CARTE 2D — Classes de probabilite</button>
+        <button id="btnRestoreRisk" onclick="restoreRiskMap()">&#8592; Retour carte de risque</button>
+      </div>
+      <div id="resultsScroll"></div>
+    </div>
+    <div id="playbackSection">
+      <div class="pb-title" id="pbTitle">Observation scenario</div>
+      <div class="pb-controls">
+        <button class="pb-btn" id="btnPlay" onclick="togglePlay()">&#9654; PLAY</button>
+        <button class="pb-btn" onclick="doStep()">STEP</button>
+        <button class="pb-btn" onclick="doReset()">&#8635; RESET</button>
+        <span class="pb-label" id="pbTimeLabel">T= 0 min</span>
       </div>
     </div>
-
-    <div class="panel-section">
-      <h3>Zone Info</h3>
-      <div id="zoneInfo">
-        <div class="row"><span class="k">Region:</span><span class="v" id="infoRegion">-</span></div>
-        <div class="row"><span class="k">Center:</span><span class="v" id="infoCenter">-</span></div>
-        <div class="row"><span class="k">Observations:</span><span class="v" id="infoObs">-</span></div>
-        <div class="row"><span class="k">Avg Slope:</span><span class="v" id="infoSlope">-</span></div>
-        <div class="row"><span class="k">Avg Wind:</span><span class="v" id="infoWind">-</span></div>
-        <div class="row"><span class="k">Avg Moisture:</span><span class="v" id="infoMoisture">-</span></div>
-        <div class="row"><span class="k">Fuel Models:</span><span class="v" id="infoFuels">-</span></div>
-      </div>
-    </div>
-
-    <div class="panel-section" id="cellPanel">
-      <h3>Selected Cell</h3>
-      <div id="cellInfo" style="color:var(--text2);">Click on a cell</div>
-    </div>
-
-    <div class="panel-section" id="firePropsPanel" style="display:none;">
-      <h3>Fire Properties</h3>
-      <div id="fireProps"></div>
-    </div>
-
-    <div class="panel-section" id="envPropsPanel" style="display:none;">
-      <h3>Environment</h3>
-      <div id="envProps"></div>
-    </div>
-
-    <div class="panel-section">
-      <h3>Stats</h3>
-      <div class="row"><span class="k">Peak fire:</span><span class="v" id="statPeakFire">-</span></div>
-      <div class="row"><span class="k">Total ignitions:</span><span class="v" id="statTotalIgn">-</span></div>
-      <div class="row"><span class="k">Duration:</span><span class="v" id="statDuration">-</span></div>
-      <div class="row"><span class="k">Final burned:</span><span class="v" id="statFinalBurn">-</span></div>
-    </div>
-  </div>
-
-  <div class="bottom-panel">
-    <div class="chart-cell"><canvas id="chartBurning"></canvas></div>
-    <div class="chart-cell"><canvas id="chartFraction"></canvas></div>
-    <div class="chart-cell"><canvas id="chartIgnitions"></canvas></div>
-    <div class="chart-cell"><canvas id="chartRos"></canvas></div>
   </div>
 </div>
-
+<div class="legend">
+  <span style="color:var(--text2);margin-right:4px;">RISQUE:</span>
+  <div class="leg-item"><div class="leg-swatch" style="background:#1a3a1a"></div>Faible</div>
+  <div class="leg-item"><div class="leg-swatch" style="background:#7a6010"></div>Moyen</div>
+  <div class="leg-item"><div class="leg-swatch" style="background:#b83000"></div>Eleve</div>
+  <div class="leg-item"><div class="leg-swatch" style="background:#ff1a00"></div>Critique</div>
+  <div class="leg-item" style="margin-left:12px"><div class="leg-swatch" style="background:#ff7700"></div>Feu actif</div>
+  <div class="leg-item"><div class="leg-swatch" style="background:#2a0f06"></div>Brule</div>
+  <div class="leg-item"><div class="leg-swatch" style="background:#080c10"></div>Coupe-feu</div>
+</div>
+<div id="statusBar"><span id="statusMsg">En attente de connexion...</span></div>
+<!-- 2D Leaflet Burn Probability Map Overlay -->
+<div id="overlay2d">
+  <div class="ov-header">
+    <span class="ov-title">&#128205; CARTE DE PROBABILITE D'INCENDIE — Foret de Bouskoura</span>
+    <span class="ov-sub" id="ov2dSub"></span>
+    <button class="ov-close" onclick="close2DMap()">&#10005; FERMER</button>
+  </div>
+  <div id="leaflet-container">
+    <div class="lf-legend" id="lfLegend"></div>
+  </div>
+</div>
+<!-- 3D Burn Probability Map Overlay -->
+<div id="overlay3d">
+  <div class="ov-header">
+    <span class="ov-title">&#127916; CARTE DE PROBABILITE D'INCENDIE — 3D</span>
+    <span class="ov-sub" id="ov3dSub">Basee sur les simulations FSim ponderees par le risque d'ignition</span>
+    <button class="ov-close" onclick="close3DMap()">&#10005; FERMER</button>
+  </div>
+  <div id="three-container">
+    <div class="map3d-legend">
+      <div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:6px;letter-spacing:1px;">PROBABILITE D'INCENDIE</div>
+      <div class="ml-row"><div class="ml-swatch" style="background:#1a3a1a"></div><span style="color:var(--text2)">&lt; 10% — Negligeable</span></div>
+      <div class="ml-row"><div class="ml-swatch" style="background:#5a7a10"></div><span style="color:var(--text2)">10-30% — Faible</span></div>
+      <div class="ml-row"><div class="ml-swatch" style="background:#c06010"></div><span style="color:var(--text2)">30-55% — Modere</span></div>
+      <div class="ml-row"><div class="ml-swatch" style="background:#e03000"></div><span style="color:var(--text2)">55-75% — Eleve</span></div>
+      <div class="ml-row"><div class="ml-swatch" style="background:#ff0a00"></div><span style="color:var(--text2)">&gt; 75% — Critique</span></div>
+    </div>
+    <div class="map3d-hint">Clic + glisser pour tourner &nbsp;|&nbsp; Molette pour zoomer</div>
+  </div>
+</div>
 <script>
-// ==========================================================================
-// BurnTrack — Hexagonal Fire Spread Visualization
-// ==========================================================================
+const WS_URL = "ws://" + location.hostname + ":8765";
+let ws=null,playing=false,speed=1.0,dt=1.0;
+let riskGrid=null,stateGrid=null,ignPts=[],bkMeta=null,scenarios=[],activeScenario=null;
+let burnProbMap=null;  // weighted burn probability from run_scenarios
+const riskCanvas=document.getElementById("riskCanvas");
+const fireCanvas=document.getElementById("fireCanvas");
+const dotCanvas=document.getElementById("dotCanvas");
+const riskCtx=riskCanvas.getContext("2d");
+const fireCtx=fireCanvas.getContext("2d");
+const dotCtx=dotCanvas.getContext("2d");
+let cellPx=4;
 
-const WS_URL = `ws://${location.hostname}:8765`;
-let ws = null;
-let sim = { grid: [], ros_grid: [], intensity_grid: [], flame_length_grid: [], env: {}, risk: {}, time_min: 0, step: 0 };
-let playing = false;
-let currentOverlay = 'state';
-let selectedCell = null;
-let cellSize = 0, offsetX = 0, offsetY = 0;
-let useHex = true;
-let burnProbGrid = [];
-
-const gridCanvas = document.getElementById('gridCanvas');
-const overlayCanvas = document.getElementById('overlayCanvas');
-const gridCtx = gridCanvas.getContext('2d');
-const overCtx = overlayCanvas.getContext('2d');
-const wrap = document.getElementById('canvasWrap');
-
-let chartBurning, chartFraction, chartIgnitions, chartRos;
-
-// ==========================================================================
-// WebSocket
-// ==========================================================================
-
-function connect() {
-  ws = new WebSocket(WS_URL);
-  ws.onopen = () => {
-    document.getElementById('connectionBadge').className = 'connection-badge connected';
-    document.getElementById('connectionBadge').textContent = 'ONLINE';
-    ws.send(JSON.stringify({ cmd: 'get_env' }));
-    ws.send(JSON.stringify({ cmd: 'get_stats' }));
-    ws.send(JSON.stringify({ cmd: 'get_real_regions' }));
+function connect(){
+  ws=new WebSocket(WS_URL);
+  ws.onopen=function(){
+    document.getElementById("badge").className="badge online";
+    document.getElementById("badge").textContent="ONLINE";
+    setStatus("Connecte au serveur BurnTrack");
   };
-  ws.onclose = () => {
-    document.getElementById('connectionBadge').className = 'connection-badge disconnected';
-    document.getElementById('connectionBadge').textContent = 'OFFLINE';
-    setTimeout(connect, 2000);
+  ws.onclose=function(){
+    document.getElementById("badge").className="badge offline";
+    document.getElementById("badge").textContent="OFFLINE";
+    setStatus("Deconnecte - reconnexion dans 2s...");
+    setTimeout(connect,2000);
   };
-  ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
+  ws.onerror=function(){setStatus("Erreur WebSocket");};
+  ws.onmessage=function(e){
+    try{handleMessage(JSON.parse(e.data));}catch(err){console.error(err);}
+  };
 }
 
-function handleMessage(msg) {
-  switch (msg.type) {
-    case 'ready':
-      if (msg.grid) {
-        document.getElementById('cfgRows').value = msg.grid.rows;
-      }
+function send(obj){if(ws&&ws.readyState===1)ws.send(JSON.stringify(obj));}
+
+function handleMessage(msg){
+  switch(msg.type){
+    case "ready": setStatus("Serveur pret - Chargez la foret pour commencer"); break;
+    case "status": setStatus(msg.message||msg.msg||""); break;
+    case "error":
+      setStatus("Erreur: "+(msg.message||msg.msg||""));
+      showProgressDone();
       break;
-    case 'configured':
-      if (msg.status === 'ok') {
-        resizeCanvas();
-        if (msg.region) {
-          document.getElementById('infoRegion').textContent = msg.region;
-          document.getElementById('infoCenter').textContent = `${msg.center_lat}, ${msg.center_lon}`;
-          document.getElementById('infoObs').textContent = msg.n_observations;
-          document.getElementById('infoSlope').textContent = msg.avg_slope_pct + '%';
-          document.getElementById('infoWind').textContent = msg.avg_wind_ms + ' m/s';
-          document.getElementById('infoMoisture').textContent = (msg.avg_moisture * 100).toFixed(1) + '%';
-          document.getElementById('infoFuels').textContent = (msg.fuel_models || []).join(', ');
-        }
-      }
+    case "bouskoura_loaded": onBouskouraLoaded(msg); break;
+    case "scenario_start": onScenarioStart(msg); break;
+    case "scenario_done": onScenarioDone(msg); break;
+    case "scenario_results": onScenarioResults(msg.results, msg); break;
+    case "frame": onFrame(msg); break;
+    case "simulation_end":
+      playing=false; updatePlayBtn();
+      setStatus("Simulation terminee - feu eteint");
       break;
-    case 'frame':
-      sim.grid = msg.grid;
-      sim.ros_grid = msg.ros_grid || [];
-      sim.intensity_grid = msg.intensity_grid || [];
-      sim.flame_length_grid = msg.flame_length_grid || [];
-      sim.time_min = msg.time_min;
-      sim.step = msg.step;
-      updateBurnProb();
-      updateStats(msg.stats);
-      renderGrid();
-      if (selectedCell) queryCell(selectedCell.row, selectedCell.col);
-      break;
-    case 'env_grids':
-      sim.env = {
-        slope_pct: msg.slope_pct || [],
-        wind_speed: msg.wind_speed || [],
-        wind_dir: msg.wind_dir || [],
-        moisture_1h: msg.moisture_1h || [],
-        elevation_m: msg.elevation_m || [],
-        fuel_codes: msg.fuel_codes || [],
-      };
-      sim.risk = {
-        fire_risk: msg.fire_risk || [],
-        terrain_risk: msg.terrain_risk || [],
-        fuel_risk: msg.fuel_risk || [],
-        wind_risk: msg.wind_risk || [],
-        moisture_risk: msg.moisture_risk || [],
-        combined_risk: msg.combined_risk || [],
-      };
-      renderGrid();
-      break;
-    case 'risk_grids':
-      sim.risk = {
-        fire_risk: msg.fire_risk || [],
-        terrain_risk: msg.terrain_risk || [],
-        fuel_risk: msg.fuel_risk || [],
-        wind_risk: msg.wind_risk || [],
-        moisture_risk: msg.moisture_risk || [],
-        combined_risk: msg.combined_risk || [],
-      };
-      renderGrid();
-      break;
-    case 'cell_detail':
-      showCellDetail(msg);
-      break;
-    case 'stats_history':
-      updateCharts(msg);
-      break;
-    case 'simulation_end':
-      playing = false;
-      document.getElementById('btnPlay').textContent = 'PLAY';
-      document.getElementById('btnPlay').classList.remove('active');
-      if (msg.summary) {
-        document.getElementById('statPeakFire').textContent = msg.summary.peak_burning_cells;
-        document.getElementById('statTotalIgn').textContent = msg.summary.total_ignitions;
-        document.getElementById('statDuration').textContent = (msg.summary.duration_min || 0).toFixed(1) + ' min';
-        document.getElementById('statFinalBurn').textContent = (msg.summary.final_burned_pct || 0).toFixed(1) + '%';
-      }
-      break;
-    case 'real_regions':
-      if (msg.regions) {
-        const sel = document.getElementById('selRegion');
-        for (const opt of sel.options) {
-          if (msg.regions[opt.value] !== undefined) {
-            opt.textContent = `${opt.value} (${msg.regions[opt.value]} pts)`;
-          }
-        }
-      }
-      break;
+    case "ensemble_scenario_result": onEnsembleResult(msg.result); break;
   }
 }
 
-// ==========================================================================
-// Burn Probability
-// ==========================================================================
+function onBouskouraLoaded(msg){
+  bkMeta=msg.meta; riskGrid=msg.risk_grid; ignPts=msg.ignition_points||[];
+  document.getElementById("fsHa").textContent=Math.round(bkMeta.forest_ha||0);
+  document.getElementById("fsCells").textContent=(bkMeta.forest_cells||0).toLocaleString();
+  document.getElementById("fsGrid").textContent=bkMeta.rows+"x"+bkMeta.cols;
+  document.getElementById("fsCellSize").textContent=bkMeta.cell_size_m+"m";
+  document.getElementById("ignPtsLabel").textContent=ignPts.length+" points d'ignition identifies";
+  renderRiskZones(msg.risk_zones);
+  document.getElementById("loadSection").style.display="none";
+  document.getElementById("forestSection").style.display="block";
+  document.getElementById("runSection").style.display="block";
+  document.getElementById("canvasMsg").style.display="none";
+  resizeCanvases();
+  drawRiskHeatmap();
+  drawIgnitionDots();
+  setStatus("Foret chargee: "+Math.round(bkMeta.forest_ha)+" ha - "+ignPts.length+" points d'ignition identifies");
+}
 
-function updateBurnProb() {
-  if (!sim.grid.length) return;
-  const rows = sim.grid.length, cols = sim.grid[0].length;
-  burnProbGrid = [];
-  for (let i = 0; i < rows; i++) {
-    burnProbGrid[i] = [];
-    for (let j = 0; j < cols; j++) {
-      const ros = sim.ros_grid[i]?.[j] || 0;
-      const slope = sim.env.slope_pct?.[i]?.[j] || 0;
-      const wind = sim.env.wind_speed?.[i]?.[j] || 0;
-      const moisture = sim.env.moisture_1h?.[i]?.[j] || 0.1;
-      let prob = Math.min(1, (ros * 0.15) + (slope * 0.005) + (wind * 0.02) - (moisture * 0.3));
-      prob = Math.max(0, Math.min(1, prob));
-      if (sim.grid[i][j] === 1) prob = 1.0;
-      if (sim.grid[i][j] === 2) prob = 0.95;
-      if (sim.grid[i][j] === 3) prob = 0.0;
-      burnProbGrid[i][j] = Math.round(prob * 100) / 100;
+function renderRiskZones(zones){
+  if(!zones)return;
+  var el=document.getElementById("riskZones");
+  var defs=[
+    {key:"critique",label:"Critique",color:"#ff4d3a"},
+    {key:"eleve",label:"Eleve",color:"#ff7c43"},
+    {key:"moyen",label:"Moyen",color:"#e6a817"},
+    {key:"faible",label:"Faible",color:"#3fb950"},
+    {key:"tres_faible",label:"Tres faible",color:"#7d8590"},
+  ];
+  var total=Object.values(zones).reduce(function(a,b){return a+b;},0)||1;
+  // also try accented keys
+  var zMap={"critique":zones["critique"]||zones["critique"]||0,"eleve":zones["élevé"]||zones["eleve"]||0,"moyen":zones["moyen"]||0,"faible":zones["faible"]||0,"tres_faible":zones["très_faible"]||zones["tres_faible"]||0};
+  el.innerHTML=defs.map(function(d){
+    var count=zMap[d.key]||0;
+    var pct=Math.round(count/total*100);
+    return "<div class='rz-row'><div class='rz-dot' style='background:"+d.color+"'></div><span class='rz-label'>"+d.label+"</span><div class='rz-bar-wrap'><div class='rz-bar' style='width:"+pct+"%;background:"+d.color+"'></div></div><span class='rz-pct'>"+pct+"%</span></div>";
+  }).join("");
+}
+
+function resizeCanvases(){
+  if(!bkMeta)return;
+  var wrap=document.getElementById("canvasWrap");
+  var W=wrap.clientWidth,H=wrap.clientHeight;
+  var rows=bkMeta.rows,cols=bkMeta.cols;
+  cellPx=Math.max(1,Math.min(W/cols,H/rows));
+  var cw=Math.floor(cols*cellPx),ch=Math.floor(rows*cellPx);
+  [riskCanvas,fireCanvas,dotCanvas].forEach(function(c){
+    c.width=cw;c.height=ch;
+    c.style.left=Math.floor((W-cw)/2)+"px";
+    c.style.top=Math.floor((H-ch)/2)+"px";
+  });
+}
+
+function riskToRGB(score){
+  if(score<=0)return [8,12,16];
+  if(score<0.25)return [26,58,26];
+  if(score<0.45)return [90,72,10];
+  if(score<0.65)return [160,55,0];
+  return [210,20,0];
+}
+
+function drawRiskHeatmap(){
+  if(!riskGrid)return;
+  var rows=riskGrid.length,cols=riskGrid[0].length;
+  var iw=riskCanvas.width,ih=riskCanvas.height;
+  var imageData=riskCtx.createImageData(iw,ih);
+  var d=imageData.data;
+  var cp=cellPx;
+  for(var r=0;r<rows;r++){
+    for(var c=0;c<cols;c++){
+      var rgb=riskToRGB(riskGrid[r][c]);
+      var px0=Math.floor(c*cp),py0=Math.floor(r*cp);
+      var px1=Math.floor((c+1)*cp),py1=Math.floor((r+1)*cp);
+      for(var y=py0;y<py1;y++){
+        for(var x=px0;x<px1;x++){
+          var idx=(y*iw+x)*4;
+          d[idx]=rgb[0];d[idx+1]=rgb[1];d[idx+2]=rgb[2];d[idx+3]=255;
+        }
+      }
+    }
+  }
+  riskCtx.putImageData(imageData,0,0);
+}
+
+function drawFireOverlay(){
+  if(!stateGrid)return;
+  fireCtx.clearRect(0,0,fireCanvas.width,fireCanvas.height);
+  var rows=stateGrid.length,cols=stateGrid[0].length;
+  var cp=cellPx;
+  for(var r=0;r<rows;r++){
+    for(var c=0;c<cols;c++){
+      var s=stateGrid[r][c];
+      if(s===0||s===3)continue;
+      var x=c*cp,y=r*cp,w=Math.max(1,cp),h=Math.max(1,cp);
+      if(s===1){fireCtx.fillStyle="#ff7700";fireCtx.fillRect(x,y,w,h);}
+      else if(s===2){fireCtx.fillStyle="#2a0f06";fireCtx.fillRect(x,y,w,h);}
     }
   }
 }
 
-// ==========================================================================
-// Hexagonal Grid Rendering
-// ==========================================================================
+function drawIgnitionDots(){
+  dotCtx.clearRect(0,0,dotCanvas.width,dotCanvas.height);
+  if(!ignPts.length)return;
+  var cp=cellPx;
+  ignPts.forEach(function(pt){
+    var cx=(pt.col+0.5)*cp,cy=(pt.row+0.5)*cp;
+    var radius=Math.max(5,cp*2.5);
+    var color=pt.risk_score>0.60?"#ff4d3a":pt.risk_score>0.45?"#ff7c43":"#e6a817";
+    dotCtx.beginPath();dotCtx.arc(cx,cy,radius,0,Math.PI*2);
+    dotCtx.fillStyle=color+"55";dotCtx.fill();
+    dotCtx.strokeStyle=color;dotCtx.lineWidth=1.5;dotCtx.stroke();
+    dotCtx.fillStyle="#fff";
+    dotCtx.font="bold "+Math.max(8,Math.floor(radius*1.1))+"px Segoe UI";
+    dotCtx.textAlign="center";dotCtx.textBaseline="middle";
+    dotCtx.fillText(pt.rank,cx,cy);
+  });
+}
 
-function resizeCanvas() {
-  const w = wrap.clientWidth, h = wrap.clientHeight;
-  gridCanvas.width = w; gridCanvas.height = h;
-  overlayCanvas.width = w; overlayCanvas.height = h;
-  if (sim.grid.length > 0) {
-    const rows = sim.grid.length, cols = sim.grid[0].length;
-    if (useHex) {
-      const hexH = Math.floor(h / (rows + 0.5));
-      const hexW = Math.floor(w / (cols * 0.866 + 0.134));
-      cellSize = Math.min(hexH, hexW);
-      offsetX = Math.floor((w - cellSize * cols * 0.866) / 2);
-      offsetY = Math.floor((h - cellSize * (rows * 0.75 + 0.25)) / 2);
+function highlightActiveScenario(pt){
+  drawIgnitionDots();
+  if(!pt)return;
+  var cp=cellPx;
+  var cx=(pt.col+0.5)*cp,cy=(pt.row+0.5)*cp;
+  var radius=Math.max(8,cp*3.5);
+  dotCtx.beginPath();dotCtx.arc(cx,cy,radius,0,Math.PI*2);
+  dotCtx.strokeStyle="#58a6ff";dotCtx.lineWidth=2.5;dotCtx.stroke();
+}
+
+function onFrame(msg){
+  stateGrid=msg.grid;
+  drawFireOverlay();
+  var stats=msg.stats||{};
+  document.getElementById("statTime").textContent=(msg.time_min||0).toFixed(1)+" min";
+  document.getElementById("statBurning").textContent=stats.burning||0;
+  document.getElementById("statBurned").textContent=((stats.burned_frac||0)*100).toFixed(1)+"%";
+  document.getElementById("statRos").textContent=(stats.ros_avg||0).toFixed(1)+" m/min";
+  document.getElementById("pbTimeLabel").textContent="T= "+(msg.time_min||0).toFixed(1)+" min";
+}
+
+function loadBouskoura(){
+  document.getElementById("btnLoad").disabled=true;
+  document.getElementById("btnLoad").textContent="Chargement...";
+  setStatus("Construction de la grille Bouskoura (173x186 cellules)...");
+  send({cmd:"load_bouskoura",n_points:12,cell_size_m:40});
+}
+
+function runScenarios(){
+  document.getElementById("runSection").style.display="none";
+  document.getElementById("progressSection").style.display="block";
+  document.getElementById("resultsSection").style.display="none";
+  setStatus("Simulation de "+ignPts.length+" scenarios d'incendie...");
+  animateProgress();
+  send({cmd:"run_scenarios",steps:60,dt:1.0});
+}
+
+var _liveResults=[];
+function onScenarioStart(msg){
+  var pct=Math.round((msg.current-1)/msg.total*100);
+  document.getElementById("progressBar").style.width=pct+"%";
+  document.getElementById("progressMsg").textContent="Scenario "+msg.current+"/"+msg.total+" — feu en cours...";
+  setStatus("Scenario "+msg.current+"/"+msg.total+" — allumage point ("+msg.point.row+","+msg.point.col+")");
+  // Highlight this ignition point on canvas
+  dotCtx.clearRect(0,0,dotCanvas.width,dotCanvas.height);
+  drawIgnitionDots();
+  var cp=cellPx;
+  var cx=(msg.point.col+0.5)*cp, cy=(msg.point.row+0.5)*cp;
+  var r=Math.max(8,cp*4);
+  dotCtx.beginPath();dotCtx.arc(cx,cy,r,0,Math.PI*2);
+  dotCtx.strokeStyle="#ff4d3a";dotCtx.lineWidth=3;dotCtx.stroke();
+  // Pulse ring
+  dotCtx.beginPath();dotCtx.arc(cx,cy,r+4,0,Math.PI*2);
+  dotCtx.strokeStyle="rgba(255,77,58,0.4)";dotCtx.lineWidth=2;dotCtx.stroke();
+}
+function onScenarioDone(msg){
+  var pct=Math.round(msg.current/msg.total*100);
+  document.getElementById("progressBar").style.width=pct+"%";
+  _liveResults.push(msg.result);
+  // Add card immediately (unsorted)
+  renderLiveCard(msg.result, msg.current, msg.total);
+  // Clear fire overlay for next scenario
+  fireCtx.clearRect(0,0,fireCanvas.width,fireCanvas.height);
+  drawIgnitionDots();
+}
+function renderLiveCard(r, current, total){
+  var el=document.getElementById("resultsScroll");
+  if(current===1){
+    el.innerHTML="";
+    document.getElementById("resultsSection").style.display="flex";
+    document.getElementById("resultsSubtitle").textContent="Scenarios en cours... "+current+"/"+total;
+  }
+  document.getElementById("resultsSubtitle").textContent=current+"/"+total+" scenarios completes";
+  var colMap={"critique":"#ff4d3a","eleve":"#ff7c43","moyen":"#e6a817","faible":"#3fb950"};
+  var dl=r.danger_level||"faible";
+  var dlKey=dl.normalize("NFD").replace(/[̀-ͯ]/g,"");
+  var col=colMap[dl]||colMap[dlKey]||"#7d8590";
+  var card=document.createElement("div");
+  card.className="result-card";
+  card.id="live-card-"+r.row+"-"+r.col;
+  card.style.borderLeftColor=col;
+  card.innerHTML="<div class='rc-top'><span class='rc-rank' style='color:"+col+"'>Point ("+r.row+","+r.col+")</span><span class='rc-danger' style='background:"+col+"22;color:"+col+"'>"+dl+"</span></div>"
+    +"<div><span class='rc-ha' style='color:"+col+"'>"+((r.burned_ha||0).toFixed(1))+" ha</span>"
+    +"<span class='rc-pct'>brulee ("+((r.burned_pct||0).toFixed(1))+"%)</span></div>";
+  el.appendChild(card);
+  el.scrollTop=el.scrollHeight;
+}
+var progressAnim=null;
+function animateProgress(){
+  var v=0;clearInterval(progressAnim);
+  progressAnim=setInterval(function(){
+    v=Math.min(v+0.4,92);
+    document.getElementById("progressBar").style.width=v+"%";
+  },400);
+}
+
+function showProgressDone(){
+  clearInterval(progressAnim);
+  document.getElementById("progressBar").style.width="100%";
+  document.getElementById("progressSection").style.display="none";
+}
+
+function onScenarioResults(results, fullMsg){
+  showProgressDone();
+  scenarios=results;
+  if(fullMsg && fullMsg.burn_probability_map){
+    burnProbMap=fullMsg.burn_probability_map;
+    document.getElementById("btn3d").style.display="block";
+    document.getElementById("btn2d").style.display="block";
+    var n=fullMsg.n_scenarios_total||results.length;
+    document.getElementById("ov3dSub").textContent="Basee sur "+n+" scenarios FSim - Bouskoura, Casablanca";
+  }
+  document.getElementById("resultsSection").style.display="flex";
+  var maxHa=Math.max.apply(null,results.map(function(r){return r.burned_ha||0;}));
+  maxHa=Math.max(maxHa,1);
+  var spreading=results.filter(function(r){return (r.burned_ha||0)>1;}).length;
+  document.getElementById("resultsSubtitle").textContent=results.length+" scenarios - "+spreading+" avec propagation significative";
+  var colMap={critique:["#ff4d3a","rgba(255,77,58,.12)"],eleve:["#ff7c43","rgba(255,124,67,.12)"],moyen:["#e6a817","rgba(230,168,23,.12)"],faible:["#3fb950","rgba(63,185,80,.12)"]};
+  // handle accented keys
+  results.forEach(function(r){if(!colMap[r.danger_level]){var k=r.danger_level.normalize("NFD").replace(/[̀-ͯ]/g,"");colMap[r.danger_level]=colMap[k]||["#7d8590","transparent"];}});
+  document.getElementById("resultsScroll").innerHTML=results.map(function(r,i){
+    var cc=colMap[r.danger_level]||["#7d8590","transparent"];
+    var col=cc[0],bg=cc[1];
+    var pct=((r.burned_ha||0)/maxHa*100).toFixed(1);
+    return "<div class='result-card' id='card-"+i+"' style='border-left-color:"+col+";background:"+bg+"'>"
+      +"<div class='rc-top'><span class='rc-rank' style='color:"+col+"'>#"+r.rank+" &nbsp; Point "+r.rank+"</span>"
+      +"<span class='rc-danger' style='background:"+col+"22;color:"+col+"'>"+r.danger_level+"</span></div>"
+      +"<div><span class='rc-ha' style='color:"+col+"'>"+((r.burned_ha||0).toFixed(1))+" ha</span>"
+      +"<span class='rc-pct'>brules &nbsp;("+((r.burned_pct||0).toFixed(1))+"% de la foret)</span></div>"
+      +"<div class='rc-bar-wrap'><div class='rc-bar' style='width:"+pct+"%;background:"+col+"'></div></div>"
+      +"<div style='font-size:10px;color:var(--text2);margin-top:2px;'>Cellule ("+r.row+", "+r.col+") - Score risque: "+Math.round((r.risk_score||0)*100)+"%</div>"
+      +"<div class='rc-actions'>"
+      +"<button class='btn-watch' onclick='watchScenario("+i+")'>&#9654; Observer le feu</button>"
+      +"<button class='btn-ensemble' onclick='runEnsemble("+i+")'>&#8853; Ensemble</button>"
+      +"</div></div>";
+  }).join("");
+  var top=results[0];
+  setStatus("Simulations terminees - Scenario le plus dangereux: "+(top?top.burned_ha.toFixed(1)+" ha ("+top.danger_level+")":"N/A"));
+}
+
+function watchScenario(idx){
+  var r=scenarios[idx];if(!r)return;
+  activeScenario=r;
+  document.querySelectorAll(".result-card").forEach(function(el,i){el.classList.toggle("active",i===idx);});
+  document.getElementById("playbackSection").style.display="block";
+  document.getElementById("pbTitle").textContent="Scenario #"+r.rank+" - Point ("+r.row+","+r.col+")";
+  playing=false;updatePlayBtn();
+  send({cmd:"reset"});
+  setTimeout(function(){
+    highlightActiveScenario(r);
+    send({cmd:"ignite",row:r.row,col:r.col});
+    setTimeout(function(){startPlay();},300);
+  },300);
+  setStatus("Observation scenario #"+r.rank+" - Point ("+r.row+","+r.col+") - "+r.burned_ha.toFixed(1)+" ha prevu");
+}
+
+function startPlay(){playing=true;updatePlayBtn();send({cmd:"play",speed:speed});}
+function togglePlay(){
+  if(playing){playing=false;send({cmd:"pause"});}
+  else{playing=true;send({cmd:"play",speed:speed});}
+  updatePlayBtn();
+}
+function doStep(){playing=false;updatePlayBtn();send({cmd:"pause"});setTimeout(function(){send({cmd:"step"});},50);}
+function doReset(){
+  playing=false;updatePlayBtn();send({cmd:"reset"});
+  fireCtx.clearRect(0,0,fireCanvas.width,fireCanvas.height);
+  document.getElementById("statTime").textContent="0 min";
+  document.getElementById("statBurning").textContent="0";
+  document.getElementById("statBurned").textContent="0%";
+  document.getElementById("statRos").textContent="0 m/min";
+  document.getElementById("pbTimeLabel").textContent="T= 0 min";
+}
+function updatePlayBtn(){
+  var btn=document.getElementById("btnPlay");
+  btn.textContent=playing?"⏸⏸ PAUSE":"▶ PLAY";
+  btn.classList.toggle("playing",playing);
+}
+
+function runEnsemble(idx){
+  var r=scenarios[idx];if(!r)return;
+  setStatus("Ensemble stochastique P"+r.rank+" - 25 realisations...");
+  send({cmd:"run_ensemble_scenario",ignition_point:r,n_realizations:25,steps:60});
+}
+
+function onEnsembleResult(result){
+  if(!result||!result.prob_map){setStatus("Resultat ensemble sans carte de probabilite");return;}
+  var pm=result.prob_map;
+  var rows=pm.length,cols=pm[0].length;
+  var iw=riskCanvas.width,ih=riskCanvas.height;
+  var imageData=riskCtx.createImageData(iw,ih);
+  var d=imageData.data;var cp=cellPx;
+  for(var r=0;r<rows;r++){
+    for(var c=0;c<cols;c++){
+      var rgb=riskToRGB(riskGrid?riskGrid[r][c]:0);
+      var px0=Math.floor(c*cp),py0=Math.floor(r*cp);
+      var px1=Math.floor((c+1)*cp),py1=Math.floor((r+1)*cp);
+      for(var y=py0;y<py1;y++){
+        for(var x=px0;x<px1;x++){
+          var idx=(y*iw+x)*4;
+          d[idx]=rgb[0];d[idx+1]=rgb[1];d[idx+2]=rgb[2];d[idx+3]=255;
+        }
+      }
+    }
+  }
+  for(var r=0;r<rows;r++){
+    for(var c=0;c<cols;c++){
+      var p=pm[r][c]||0;if(p<0.05)continue;
+      var alpha=Math.floor(p*200);
+      var R=255,G=Math.floor(120*(1-p)),B=0;
+      var px0=Math.floor(c*cp),py0=Math.floor(r*cp);
+      var px1=Math.floor((c+1)*cp),py1=Math.floor((r+1)*cp);
+      for(var y=py0;y<py1;y++){
+        for(var x=px0;x<px1;x++){
+          var idx=(y*iw+x)*4;
+          var a=alpha/255;
+          d[idx]=Math.floor(d[idx]*(1-a)+R*a);
+          d[idx+1]=Math.floor(d[idx+1]*(1-a)+G*a);
+          d[idx+2]=Math.floor(d[idx+2]*(1-a)+B*a);
+        }
+      }
+    }
+  }
+  riskCtx.putImageData(imageData,0,0);
+  drawIgnitionDots();
+  var mean=result.mean_burned_ha||0;
+  var std=result.std_burned_ha||0;
+  setStatus("Ensemble termine - Surface moyenne brulee: "+mean.toFixed(1)+" ha +/- "+std.toFixed(1)+" ha");
+}
+
+function setStatus(msg){document.getElementById("statusMsg").textContent=msg;}
+
+// ─── 2D Leaflet Burn Probability Map ─────────────────────────────────────────
+var _leafletMap=null, _probLayer=null;
+
+function show2DProbMap(){
+  if(!burnProbMap||!bkMeta)return;
+  var rows=bkMeta.rows, cols=bkMeta.cols;
+
+  // Collect non-zero values for quantile breaks
+  var vals=[];
+  for(var r=0;r<rows;r++){
+    for(var c=0;c<cols;c++){
+      var p=Array.isArray(burnProbMap[r])?burnProbMap[r][c]:(burnProbMap[r*cols+c]||0);
+      if(p>0.001)vals.push(p);
+    }
+  }
+  if(!vals.length){setStatus("Aucune donnee de probabilite");return;}
+  vals.sort(function(a,b){return a-b;});
+  var n=vals.length;
+  var breaks=[vals[Math.floor(n*0.25)],vals[Math.floor(n*0.55)],vals[Math.floor(n*0.80)]];
+
+  // Class colors: light yellow → yellow-orange → orange → red (like Assali 2016)
+  var palette=[[245,242,150,180],[230,160,30,200],[200,70,10,210],[180,10,10,220]];
+
+  // Render choropleth on offscreen canvas (1px per cell, transparent bg)
+  var off=document.createElement("canvas");
+  off.width=cols; off.height=rows;
+  var ctx2=off.getContext("2d");
+  var img=ctx2.createImageData(cols,rows);
+  var d=img.data;
+  for(var r=0;r<rows;r++){
+    for(var c=0;c<cols;c++){
+      var p=Array.isArray(burnProbMap[r])?burnProbMap[r][c]:(burnProbMap[r*cols+c]||0);
+      var idx4=(r*cols+c)*4;
+      if(p<=0.001){d[idx4+3]=0;continue;}
+      var cls=0;
+      if(p>breaks[2])cls=3;
+      else if(p>breaks[1])cls=2;
+      else if(p>breaks[0])cls=1;
+      d[idx4]=palette[cls][0];d[idx4+1]=palette[cls][1];d[idx4+2]=palette[cls][2];d[idx4+3]=palette[cls][3];
+    }
+  }
+  ctx2.putImageData(img,0,0);
+  var dataUrl=off.toDataURL("image/png");
+
+  // Open overlay
+  var ov=document.getElementById("overlay2d");
+  ov.classList.add("active");
+  document.getElementById("ov2dSub").textContent="Foret de Bouskoura — "+n+" cellules actives — "+vals.length+" points FSim";
+
+  // Init Leaflet map (once)
+  setTimeout(function(){
+    var lc=document.getElementById("leaflet-container");
+    if(!_leafletMap){
+      _leafletMap=L.map(lc,{
+        center:[33.376,-7.624],
+        zoom:14,
+        zoomControl:true
+      });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+        attribution:"&copy; OpenStreetMap contributors",
+        maxZoom:18
+      }).addTo(_leafletMap);
     } else {
-      cellSize = Math.min(Math.floor(w / cols), Math.floor(h / rows));
-      offsetX = Math.floor((w - cellSize * cols) / 2);
-      offsetY = Math.floor((h - cellSize * rows) / 2);
+      _leafletMap.invalidateSize();
+    }
+
+    // Remove old prob layer
+    if(_probLayer){_leafletMap.removeLayer(_probLayer);_probLayer=null;}
+
+    // Bounds: [[lat_se, lon_nw], [lat_nw, lon_se]]
+    var bounds=[[bkMeta.lat_se,bkMeta.lon_nw],[bkMeta.lat_nw,bkMeta.lon_se]];
+    _probLayer=L.imageOverlay(dataUrl,bounds,{opacity:0.82,interactive:false}).addTo(_leafletMap);
+    _leafletMap.fitBounds(bounds,{padding:[20,20]});
+
+    // Draw Bouskoura polygon outline
+    var polyCoords=[
+      [33.400,-7.653],[33.402,-7.636],[33.397,-7.622],[33.380,-7.621],
+      [33.363,-7.625],[33.352,-7.637],[33.351,-7.650],[33.362,-7.661],
+      [33.381,-7.661]
+    ];
+    L.polygon(polyCoords,{color:"#24292f",weight:2,fill:false,dashArray:"4 4"}).addTo(_leafletMap);
+
+    // Legend
+    var fmt=function(v){return v.toFixed(3);};
+    var classes=[
+      {c:"#f5f296",b:"0.000 — "+fmt(breaks[0])},
+      {c:"#e6a01e",b:fmt(breaks[0])+" — "+fmt(breaks[1])},
+      {c:"#c84600",b:fmt(breaks[1])+" — "+fmt(breaks[2])},
+      {c:"#b40a0a",b:fmt(breaks[2])+" — "+fmt(vals[n-1])},
+    ];
+    var labels=["Faible","Modere","Eleve","Critique"];
+    document.getElementById("lfLegend").innerHTML=
+      "<div class='ll-title'>Probabilite d'incendie</div>"
+      +classes.map(function(cl,i){
+        return "<div class='ll-row'><div class='ll-swatch' style='background:"+cl.c+"'></div>"
+          +"<span style='color:#24292f'>"+cl.b+" <em style='color:#57606a'>("+labels[i]+")</em></span></div>";
+      }).join("")
+      +"<div style='margin-top:8px;font-size:10px;color:#57606a;border-top:1px solid #d0d7de;padding-top:6px'>Methode FSim — Assali et al. 2016<br>Foret de Bouskoura, Casablanca</div>";
+  },100);
+}
+
+function close2DMap(){
+  document.getElementById("overlay2d").classList.remove("active");
+  if(_leafletMap){_leafletMap.invalidateSize();}
+}
+
+function restoreRiskMap(){
+  drawRiskHeatmap();
+  drawIgnitionDots();
+  document.getElementById("prob2dLegend").style.display="none";
+  document.getElementById("btnRestoreRisk").style.display="none";
+  setStatus("Carte de risque restauree");
+}
+
+// ─── 3D Burn Probability Map (Three.js) ──────────────────────────────────────
+var _three={renderer:null,scene:null,camera:null,animId:null,isDragging:false,lastMouse:{x:0,y:0},spherical:{theta:0.6,phi:1.0,radius:280},autoRot:true};
+
+function probToColor(p){
+  if(p<0.10){var t=p/0.10;return [Math.floor(26*(1-t)+90*t),Math.floor(58*(1-t)+122*t),Math.floor(26*(1-t)+16*t)];}
+  if(p<0.30){var t=(p-0.10)/0.20;return [Math.floor(90*(1-t)+192*t),Math.floor(122*(1-t)+96*t),Math.floor(16*(1-t)+16*t)];}
+  if(p<0.55){var t=(p-0.30)/0.25;return [Math.floor(192*(1-t)+224*t),Math.floor(96*(1-t)+48*t),Math.floor(16*(1-t)+0*t)];}
+  if(p<0.75){var t=(p-0.55)/0.20;return [Math.floor(224*(1-t)+255*t),Math.floor(48*(1-t)+10*t),0];}
+  var t=Math.min(1,(p-0.75)/0.25);return [255,Math.floor(10*(1-t)),0];
+}
+
+function open3DMap(){
+  if(!burnProbMap||!bkMeta)return;
+  var ov=document.getElementById("overlay3d");
+  ov.classList.add("active");
+  setTimeout(function(){build3DScene(burnProbMap,bkMeta.rows,bkMeta.cols);},50);
+}
+
+function close3DMap(){
+  var ov=document.getElementById("overlay3d");
+  ov.classList.remove("active");
+  if(_three.animId){cancelAnimationFrame(_three.animId);_three.animId=null;}
+  if(_three.renderer){_three.renderer.dispose();_three.renderer=null;}
+  var c=document.getElementById("three-container");
+  var cv=c.querySelector("canvas");
+  if(cv)c.removeChild(cv);
+}
+
+function build3DScene(probFlat,rows,cols){
+  var container=document.getElementById("three-container");
+  var W=container.clientWidth,H=container.clientHeight;
+  var renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+  renderer.setSize(W,H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer.setClearColor(0x080c10,1);
+  container.appendChild(renderer.domElement);
+  _three.renderer=renderer;
+  var scene=new THREE.Scene();
+  var camera=new THREE.PerspectiveCamera(45,W/H,1,2000);
+  _three.scene=scene;_three.camera=camera;
+  scene.fog=new THREE.Fog(0x080c10,400,800);
+  scene.add(new THREE.AmbientLight(0xffffff,0.45));
+  var dirLight=new THREE.DirectionalLight(0xffd580,0.9);
+  dirLight.position.set(60,120,80);scene.add(dirLight);
+  var fillLight=new THREE.DirectionalLight(0x4040ff,0.25);
+  fillLight.position.set(-80,-30,-60);scene.add(fillLight);
+  var planeW=cols*2,planeH=rows*2;
+  var segW=cols-1,segH=rows-1;
+  var geo=new THREE.PlaneGeometry(planeW,planeH,segW,segH);
+  geo.rotateX(-Math.PI/2);
+  var maxHeight=60;
+  var positions=geo.attributes.position;
+  var colors=[];
+  for(var i=0;i<=segH;i++){
+    for(var j=0;j<=segW;j++){
+      var vertIdx=i*(segW+1)+j;
+      var ri=Math.min(i,rows-1),ci=Math.min(j,cols-1);
+      var p=0;
+      if(Array.isArray(probFlat[ri])){p=probFlat[ri][ci]||0;}
+      else{p=probFlat[ri*cols+ci]||0;}
+      p=Math.max(0,Math.min(1,p));
+      positions.setY(vertIdx,p*maxHeight);
+      var rgb=probToColor(p);
+      colors.push(rgb[0]/255,rgb[1]/255,rgb[2]/255);
     }
   }
-  renderGrid();
+  geo.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));
+  positions.needsUpdate=true;
+  geo.computeVertexNormals();
+  var mat=new THREE.MeshPhongMaterial({vertexColors:true,shininess:20,side:THREE.DoubleSide});
+  var mesh=new THREE.Mesh(geo,mat);
+  scene.add(mesh);
+  var wf=new THREE.WireframeGeometry(geo);
+  var wfLines=new THREE.LineSegments(wf,new THREE.LineBasicMaterial({color:0x1a2a1a,opacity:0.12,transparent:true}));
+  scene.add(wfLines);
+  var sph=_three.spherical;
+  sph.radius=Math.max(rows,cols)*1.6;
+  updateCamera();
+  var dom=renderer.domElement;
+  dom.addEventListener("mousedown",function(e){_three.isDragging=true;_three.lastMouse={x:e.clientX,y:e.clientY};_three.autoRot=false;});
+  window.addEventListener("mouseup",function(){_three.isDragging=false;});
+  window.addEventListener("mousemove",function(e){
+    if(!_three.isDragging)return;
+    var dx=e.clientX-_three.lastMouse.x,dy=e.clientY-_three.lastMouse.y;
+    sph.theta-=dx*0.008;sph.phi-=dy*0.008;
+    sph.phi=Math.max(0.15,Math.min(Math.PI/2-0.05,sph.phi));
+    _three.lastMouse={x:e.clientX,y:e.clientY};
+    updateCamera();
+  });
+  dom.addEventListener("wheel",function(e){
+    sph.radius=Math.max(60,Math.min(sph.radius+e.deltaY*0.4,600));
+    updateCamera();e.preventDefault();
+  },{passive:false});
+  var _touch=null;
+  dom.addEventListener("touchstart",function(e){_touch={x:e.touches[0].clientX,y:e.touches[0].clientY};_three.autoRot=false;},{passive:true});
+  dom.addEventListener("touchmove",function(e){
+    if(!_touch)return;
+    var dx=e.touches[0].clientX-_touch.x,dy=e.touches[0].clientY-_touch.y;
+    sph.theta-=dx*0.01;sph.phi-=dy*0.01;
+    sph.phi=Math.max(0.15,Math.min(Math.PI/2-0.05,sph.phi));
+    _touch={x:e.touches[0].clientX,y:e.touches[0].clientY};
+    updateCamera();
+  },{passive:true});
+  (function loop(){
+    _three.animId=requestAnimationFrame(loop);
+    if(_three.autoRot){sph.theta+=0.003;updateCamera();}
+    renderer.render(scene,camera);
+  })();
 }
 
-function hexPath(ctx, cx, cy, size) {
-  const s = size * 0.48;
-  ctx.beginPath();
-  for (let i = 0; i < 6; i++) {
-    const angle = Math.PI / 180 * (60 * i - 30);
-    const x = cx + s * Math.cos(angle);
-    const y = cy + s * Math.sin(angle);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
+function updateCamera(){
+  var s=_three.spherical,cam=_three.camera;
+  if(!cam)return;
+  cam.position.x=s.radius*Math.sin(s.phi)*Math.sin(s.theta);
+  cam.position.y=s.radius*Math.cos(s.phi);
+  cam.position.z=s.radius*Math.sin(s.phi)*Math.cos(s.theta);
+  cam.lookAt(0,10,0);
 }
+// ─────────────────────────────────────────────────────────────────────────────
 
-function hexCenter(row, col) {
-  const w = cellSize * 0.866;
-  const h = cellSize * 0.75;
-  const cx = offsetX + col * w + (row % 2 === 1 ? w / 2 : 0) + w / 2;
-  const cy = offsetY + row * h + cellSize * 0.48;
-  return [cx, cy];
-}
-
-// ==========================================================================
-// Color Palettes
-// ==========================================================================
-
-const STATE_COLORS = { 0: '#2d5a27', 1: '#1a8c3c', 2: '#5c3a1e', 3: '#1a3a6e' };
-
-function getColorForValue(val, min, max, palette) {
-  const t = max > min ? Math.max(0, Math.min(1, (val - min) / (max - min))) : 0;
-  const idx = Math.min(Math.floor(t * (palette.length - 1)), palette.length - 2);
-  const frac = t * (palette.length - 1) - idx;
-  const c1 = palette[idx], c2 = palette[idx + 1];
-  return [c1[0] + (c2[0] - c1[0]) * frac, c1[1] + (c2[1] - c1[1]) * frac, c1[2] + (c2[2] - c1[2]) * frac];
-}
-
-function rgb(c) { return `rgb(${c[0]|0},${c[1]|0},${c[2]|0})`; }
-function rgba(c, a) { return `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`; }
-
-const PAL = {
-  ros: [[30,90,30],[180,180,30],[255,140,0],[220,40,40],[160,0,200]],
-  intensity: [[30,80,180],[80,180,80],[255,200,30],[255,80,30],[200,0,120]],
-  flame: [[30,100,200],[40,180,80],[200,200,40],[255,140,30],[220,30,30]],
-  slope: [[40,80,40],[100,160,50],[200,180,40],[200,90,30],[160,30,30]],
-  wind_speed: [[30,80,180],[40,160,160],[200,180,40],[255,100,30],[200,20,50]],
-  moisture: [[180,30,30],[200,100,30],[200,180,40],[80,170,80],[30,120,180]],
-  elevation: [[40,40,140],[40,140,40],[180,180,40],[180,80,40],[140,40,40]],
-  burn_prob: [[20,40,20],[30,100,30],[80,180,40],[200,200,40],[220,60,30]],
-  // Risk maps - Green (low) -> Yellow -> Orange -> Red (high)
-  fire_risk: [[20,80,20],[60,140,40],[180,180,30],[255,120,30],[220,30,30]],
-  terrain_risk: [[30,70,30],[80,130,40],[180,160,40],[180,90,30],[140,30,30]],
-  fuel_risk: [[20,80,30],[50,140,50],[140,180,40],[200,140,30],[180,40,30]],
-  wind_risk: [[30,80,180],[40,140,140],[160,180,40],[240,100,30],[200,20,50]],
-  moisture_risk: [[20,120,180],[60,160,100],[180,180,40],[200,100,30],[180,30,30]],
-  combined_risk: [[20,80,30],[50,140,50],[180,180,30],[255,100,30],[220,30,30]],
-};
-
-function getOverlayColor(i, j) {
-  let data, min, max, pal;
-  switch (currentOverlay) {
-    case 'ros': data = sim.ros_grid; min = 0; max = 8; pal = PAL.ros; break;
-    case 'intensity': data = sim.intensity_grid; min = 0; max = 8000; pal = PAL.intensity; break;
-    case 'flame': data = sim.flame_length_grid; min = 0; max = 12; pal = PAL.flame; break;
-    case 'slope': data = sim.env.slope_pct; min = 0; max = 50; pal = PAL.slope; break;
-    case 'wind_speed': data = sim.env.wind_speed; min = 0; max = 20; pal = PAL.wind_speed; break;
-    case 'moisture': data = sim.env.moisture_1h; min = 0; max = 0.4; pal = PAL.moisture; break;
-    case 'elevation': data = sim.env.elevation_m; min = 0; max = 2000; pal = PAL.elevation; break;
-    case 'burn_prob': data = burnProbGrid; min = 0; max = 1; pal = PAL.burn_prob; break;
-    case 'fire_risk': data = sim.risk.fire_risk; min = 0; max = 1; pal = PAL.fire_risk; break;
-    case 'terrain_risk': data = sim.risk.terrain_risk; min = 0; max = 1; pal = PAL.terrain_risk; break;
-    case 'fuel_risk': data = sim.risk.fuel_risk; min = 0; max = 1; pal = PAL.fuel_risk; break;
-    case 'wind_risk': data = sim.risk.wind_risk; min = 0; max = 1; pal = PAL.wind_risk; break;
-    case 'moisture_risk': data = sim.risk.moisture_risk; min = 0; max = 1; pal = PAL.moisture_risk; break;
-    case 'combined_risk': data = sim.risk.combined_risk; min = 0; max = 1; pal = PAL.combined_risk; break;
-    default: return STATE_COLORS[sim.grid[i]?.[j]] || '#333';
-  }
-  if (data && data[i] && data[i][j] !== undefined) {
-    return rgb(getColorForValue(data[i][j], min, max, pal));
-  }
-  return STATE_COLORS[sim.grid[i]?.[j]] || '#333';
-}
-
-// ==========================================================================
-// Main Render
-// ==========================================================================
-
-function renderGrid() {
-  if (!sim.grid || !sim.grid.length) return;
-  const rows = sim.grid.length, cols = sim.grid[0].length;
-  gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
-  overCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-
-  // Background
-  gridCtx.fillStyle = '#080c12';
-  gridCtx.fillRect(0, 0, gridCanvas.width, gridCanvas.height);
-
-  if (useHex) renderHexGrid(rows, cols);
-  else renderSquareGrid(rows, cols);
-
-  // Contours
-  if (document.getElementById('chkContours').checked && sim.env.elevation_m?.length) {
-    renderContours(rows, cols);
-  }
-
-  // Spread arrows
-  if (document.getElementById('chkArrows').checked) {
-    renderSpreadArrows(rows, cols);
-  }
-
-  // Selection highlight
-  if (selectedCell) {
-    const [cx, cy] = useHex ? hexCenter(selectedCell.row, selectedCell.col) :
-      [offsetX + selectedCell.col * cellSize + cellSize / 2, offsetY + selectedCell.row * cellSize + cellSize / 2];
-    gridCtx.strokeStyle = '#fff';
-    gridCtx.lineWidth = 2;
-    if (useHex) {
-      hexPath(gridCtx, cx, cy, cellSize);
-      gridCtx.stroke();
-    } else {
-      gridCtx.strokeRect(offsetX + selectedCell.col * cellSize, offsetY + selectedCell.row * cellSize, cellSize, cellSize);
-    }
-  }
-}
-
-function renderHexGrid(rows, cols) {
-  const showNumbers = document.getElementById('chkNumbers').checked;
-
-  for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < cols; j++) {
-      const [cx, cy] = hexCenter(i, j);
-      const state = sim.grid[i][j];
-      let fillColor = STATE_COLORS[state] || '#333';
-      if (currentOverlay !== 'state') fillColor = getOverlayColor(i, j);
-
-      // Fill hex
-      hexPath(gridCtx, cx, cy, cellSize);
-      gridCtx.fillStyle = fillColor;
-      gridCtx.fill();
-
-      // Hex border
-      hexPath(gridCtx, cx, cy, cellSize);
-      gridCtx.strokeStyle = 'rgba(255,255,255,0.08)';
-      gridCtx.lineWidth = 0.5;
-      gridCtx.stroke();
-
-      // Hatching for fire cells
-      if (state === 1) {
-        gridCtx.save();
-        hexPath(gridCtx, cx, cy, cellSize);
-        gridCtx.clip();
-        gridCtx.strokeStyle = 'rgba(255,255,255,0.15)';
-        gridCtx.lineWidth = 0.8;
-        for (let d = -cellSize; d < cellSize * 2; d += 4) {
-          gridCtx.beginPath();
-          gridCtx.moveTo(cx + d, cy - cellSize);
-          gridCtx.lineTo(cx + d + cellSize, cy + cellSize);
-          gridCtx.stroke();
-        }
-        gridCtx.restore();
-      }
-
-      // Burn probability number
-      if (showNumbers && burnProbGrid[i] && burnProbGrid[i][j] > 0.05 && state !== 3) {
-        const prob = burnProbGrid[i][j];
-        gridCtx.fillStyle = state === 1 ? '#fff' : (prob > 0.5 ? '#ffdd44' : '#aacc88');
-        gridCtx.font = `${Math.max(7, cellSize * 0.22)}px Consolas, monospace`;
-        gridCtx.textAlign = 'center';
-        gridCtx.textBaseline = 'middle';
-        gridCtx.fillText(prob.toFixed(2), cx, cy + cellSize * 0.15);
-      }
-
-      // Fuel code label for large cells
-      if (cellSize > 28 && state === 0) {
-        const fuel = sim.env.fuel_codes?.[i]?.[j] || '';
-        if (fuel) {
-          gridCtx.fillStyle = 'rgba(255,255,255,0.25)';
-          gridCtx.font = `${Math.max(6, cellSize * 0.15)}px Consolas`;
-          gridCtx.textAlign = 'center';
-          gridCtx.fillText(fuel, cx, cy - cellSize * 0.15);
-        }
-      }
-    }
-  }
-}
-
-function renderSquareGrid(rows, cols) {
-  const showNumbers = document.getElementById('chkNumbers').checked;
-
-  for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < cols; j++) {
-      const state = sim.grid[i][j];
-      let fillColor = STATE_COLORS[state] || '#333';
-      if (currentOverlay !== 'state') fillColor = getOverlayColor(i, j);
-
-      gridCtx.fillStyle = fillColor;
-      gridCtx.fillRect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
-
-      gridCtx.strokeStyle = 'rgba(255,255,255,0.06)';
-      gridCtx.lineWidth = 0.5;
-      gridCtx.strokeRect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
-
-      // Hatching
-      if (state === 1 && cellSize > 6) {
-        gridCtx.save();
-        gridCtx.beginPath();
-        gridCtx.rect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
-        gridCtx.clip();
-        gridCtx.strokeStyle = 'rgba(255,255,255,0.12)';
-        gridCtx.lineWidth = 0.6;
-        for (let d = -cellSize; d < cellSize * 2; d += 4) {
-          const x0 = offsetX + j * cellSize + d;
-          gridCtx.beginPath();
-          gridCtx.moveTo(x0, offsetY + i * cellSize);
-          gridCtx.lineTo(x0 + cellSize, offsetY + (i + 1) * cellSize);
-          gridCtx.stroke();
-        }
-        gridCtx.restore();
-      }
-
-      if (showNumbers && burnProbGrid[i] && burnProbGrid[i][j] > 0.05 && state !== 3) {
-        const prob = burnProbGrid[i][j];
-        gridCtx.fillStyle = state === 1 ? '#fff' : (prob > 0.5 ? '#ffdd44' : '#aacc88');
-        gridCtx.font = `${Math.max(7, cellSize * 0.28)}px Consolas, monospace`;
-        gridCtx.textAlign = 'center';
-        gridCtx.textBaseline = 'middle';
-        gridCtx.fillText(prob.toFixed(2), offsetX + j * cellSize + cellSize / 2, offsetY + i * cellSize + cellSize / 2 + cellSize * 0.15);
-      }
-    }
-  }
-}
-
-// ==========================================================================
-// Contour Lines (Elevation)
-// ==========================================================================
-
-function renderContours(rows, cols) {
-  const elev = sim.env.elevation_m;
-  if (!elev || !elev.length) return;
-  const levels = [200, 500, 800, 1000, 1200, 1500, 1800];
-
-  gridCtx.strokeStyle = 'rgba(255,255,255,0.2)';
-  gridCtx.lineWidth = 0.8;
-  gridCtx.setLineDash([3, 3]);
-
-  for (const level of levels) {
-    for (let i = 0; i < rows - 1; i++) {
-      for (let j = 0; j < cols - 1; j++) {
-        const v00 = elev[i]?.[j] || 0;
-        const v10 = elev[i + 1]?.[j] || 0;
-        const v01 = elev[i]?.[j + 1] || 0;
-
-        // Horizontal edge
-        if ((v00 < level && v10 >= level) || (v00 >= level && v10 < level)) {
-          const t = (level - v00) / (v10 - v00);
-          let cx, cy;
-          if (useHex) {
-            const [x0, y0] = hexCenter(i, j);
-            const [x1, y1] = hexCenter(i + 1, j);
-            cx = x0 + (x1 - x0) * t;
-            cy = y0 + (y1 - y0) * t;
-          } else {
-            cx = offsetX + j * cellSize + cellSize / 2;
-            cy = offsetY + (i + t) * cellSize;
-          }
-          gridCtx.beginPath();
-          gridCtx.arc(cx, cy, 1.5, 0, Math.PI * 2);
-          gridCtx.stroke();
-        }
-
-        // Vertical edge
-        if ((v00 < level && v01 >= level) || (v00 >= level && v01 < level)) {
-          const t = (level - v00) / (v01 - v00);
-          let cx, cy;
-          if (useHex) {
-            const [x0, y0] = hexCenter(i, j);
-            const [x1, y1] = hexCenter(i, j + 1);
-            cx = x0 + (x1 - x0) * t;
-            cy = y0 + (y1 - y0) * t;
-          } else {
-            cx = offsetX + (j + t) * cellSize;
-            cy = offsetY + i * cellSize + cellSize / 2;
-          }
-          gridCtx.beginPath();
-          gridCtx.arc(cx, cy, 1.5, 0, Math.PI * 2);
-          gridCtx.stroke();
-        }
-      }
-    }
-  }
-  gridCtx.setLineDash([]);
-}
-
-// ==========================================================================
-// Spread Vector Arrows
-// ==========================================================================
-
-function renderSpreadArrows(rows, cols) {
-  overCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-
-  for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < cols; j++) {
-      if (sim.grid[i][j] !== 1) continue;
-
-      const windDir = sim.env.wind_dir?.[i]?.[j] || 270;
-      const windSpeed = sim.env.wind_speed?.[i]?.[j] || 3;
-      const ros = sim.ros_grid?.[i]?.[j] || 0;
-      const slope = sim.env.slope_pct?.[i]?.[j] || 0;
-
-      // Spread direction = wind direction + 180 (wind blows FROM direction, fire spreads TOWARD)
-      const spreadDir = (windDir + 180) % 360;
-      const rad = spreadDir * Math.PI / 180;
-
-      let cx, cy;
-      if (useHex) {
-        [cx, cy] = hexCenter(i, j);
-      } else {
-        cx = offsetX + j * cellSize + cellSize / 2;
-        cy = offsetY + i * cellSize + cellSize / 2;
-      }
-
-      const len = cellSize * 0.35 * Math.min(windSpeed / 10, 1.5);
-      const endX = cx + Math.sin(rad) * len;
-      const endY = cy - Math.cos(rad) * len;
-
-      // Arrow line
-      overCtx.strokeStyle = ros > 3 ? 'rgba(80,255,120,0.8)' : 'rgba(80,200,120,0.5)';
-      overCtx.lineWidth = 1.5;
-      overCtx.beginPath();
-      overCtx.moveTo(cx, cy);
-      overCtx.lineTo(endX, endY);
-      overCtx.stroke();
-
-      // Arrowhead
-      const headLen = 4;
-      const headAngle = 0.5;
-      overCtx.beginPath();
-      overCtx.moveTo(endX, endY);
-      overCtx.lineTo(endX - headLen * Math.cos(rad - headAngle), endY - headLen * Math.sin(rad - headAngle));
-      overCtx.moveTo(endX, endY);
-      overCtx.lineTo(endX - headLen * Math.cos(rad + headAngle), endY - headLen * Math.sin(rad + headAngle));
-      overCtx.stroke();
-
-      // Wind + Slope label
-      if (cellSize > 20) {
-        overCtx.fillStyle = 'rgba(255,255,255,0.5)';
-        overCtx.font = `${Math.max(6, cellSize * 0.14)}px Consolas`;
-        overCtx.textAlign = 'center';
-        overCtx.fillText(`W+S`, cx, cy - cellSize * 0.28);
-      }
-    }
-  }
-}
-
-// ==========================================================================
-// Charts
-// ==========================================================================
-
-const chartOpts = (title) => ({
-  responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
-  plugins: { legend: { display: false }, title: { display: true, text: title, color: '#7a8599', font: { size: 10, family: 'Consolas' } } },
-  scales: {
-    x: { ticks: { color: '#7a8599', font: { size: 8 }, maxTicksLimit: 5 }, grid: { color: 'rgba(255,255,255,0.04)' } },
-    y: { ticks: { color: '#7a8599', font: { size: 8 }, maxTicksLimit: 4 }, grid: { color: 'rgba(255,255,255,0.04)' } },
-  },
-  elements: { point: { radius: 0 }, line: { borderWidth: 1.2 } },
+window.addEventListener("resize",function(){
+  resizeCanvases();
+  if(riskGrid)drawRiskHeatmap();
+  drawFireOverlay();
+  drawIgnitionDots();
+  if(activeScenario)highlightActiveScenario(activeScenario);
 });
 
-function initCharts() {
-  chartBurning = new Chart(document.getElementById('chartBurning'), {
-    type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#ff4d3a', backgroundColor: 'rgba(255,77,58,0.08)', fill: true }] },
-    options: chartOpts('Active Fire Cells'),
-  });
-  chartFraction = new Chart(document.getElementById('chartFraction'), {
-    type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#e6a817', backgroundColor: 'rgba(230,168,23,0.08)', fill: true }] },
-    options: chartOpts('Burned Fraction %'),
-  });
-  chartIgnitions = new Chart(document.getElementById('chartIgnitions'), {
-    type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: 'rgba(77,166,255,0.5)', borderColor: '#4da6ff', borderWidth: 1 }] },
-    options: chartOpts('New Ignitions'),
-  });
-  chartRos = new Chart(document.getElementById('chartRos'), {
-    type: 'line', data: { labels: [], datasets: [{ data: [], borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.08)', fill: true }] },
-    options: chartOpts('Avg ROS m/min'),
-  });
-}
-
-function updateCharts(stats) {
-  if (!stats.time) return;
-  const labels = stats.time.map(t => t.toFixed(0));
-  chartBurning.data.labels = labels; chartBurning.data.datasets[0].data = stats.burning; chartBurning.update('none');
-  chartFraction.data.labels = labels; chartFraction.data.datasets[0].data = stats.fraction.map(f => (f * 100).toFixed(2)); chartFraction.update('none');
-  chartIgnitions.data.labels = labels; chartIgnitions.data.datasets[0].data = stats.ignitions; chartIgnitions.update('none');
-  chartRos.data.labels = labels; chartRos.data.datasets[0].data = stats.ros_avg; chartRos.update('none');
-}
-
-// ==========================================================================
-// UI Updates
-// ==========================================================================
-
-function updateStats(stats) {
-  document.getElementById('hdrTime').textContent = sim.time_min.toFixed(1) + ' min';
-  document.getElementById('hdrStep').textContent = sim.step;
-  document.getElementById('hdrBurning').textContent = stats.burning;
-  document.getElementById('hdrBurned').textContent = (stats.burned_frac * 100).toFixed(1) + '%';
-  document.getElementById('hdrRos').textContent = stats.ros_avg.toFixed(2) + ' m/min';
-  document.getElementById('hdrIntensity').textContent = stats.intensity_avg.toFixed(0) + ' kW/m';
-}
-
-function showCellDetail(d) {
-  const stateMap = { 'UNBURNED': 'Unburned', 'BURNING': 'ACTIVE FIRE', 'BURNED': 'Burned', 'FIREBREAK': 'Firebreak' };
-  const stateColors = { 'UNBURNED': '#2d5a27', 'BURNING': '#ff4d3a', 'BURNED': '#5c3a1e', 'FIREBREAK': '#1a3a6e' };
-
-  let html = `<div class="row"><span class="k">Pos:</span><span class="v">(${d.row}, ${d.col})</span></div>`;
-  html += `<div class="row"><span class="k">State:</span><span class="v" style="color:${stateColors[d.state]}">${stateMap[d.state] || d.state}</span></div>`;
-  html += `<div class="row"><span class="k">Fuel:</span><span class="v">${d.fuel_code}</span></div>`;
-  if (burnProbGrid[d.row] && burnProbGrid[d.row][d.col] !== undefined) {
-    html += `<div class="row"><span class="k">P(burn):</span><span class="v" style="color:${burnProbGrid[d.row][d.col] > 0.5 ? '#ffdd44' : '#aacc88'}">${burnProbGrid[d.row][d.col].toFixed(2)}</span></div>`;
-  }
-  document.getElementById('cellInfo').innerHTML = html;
-
-  if (d.state === 'BURNING') {
-    document.getElementById('firePropsPanel').style.display = 'block';
-    let fp = '';
-    fp += row('ROS Rothermel', d.ros_rothermel?.toFixed(3) + ' m/min');
-    fp += row('Fireline Intensity', d.fireline_intensity?.toFixed(1) + ' kW/m');
-    fp += row('Flame Length', d.flame_length?.toFixed(3) + ' m');
-    fp += row('Reaction Intensity', d.reaction_intensity?.toFixed(1) + ' kW/m2');
-    fp += row('Residence Time', d.residence_time?.toFixed(3) + ' min');
-    fp += row('Fuel Consumption', d.fuel_consumption?.toFixed(4) + ' kg/m2');
-    fp += row('Phi Wind', d.phi_w?.toFixed(4));
-    fp += row('Phi Slope', d.phi_s?.toFixed(4));
-    fp += row('Phi Effective', d.phi_eff?.toFixed(4));
-    fp += row('Heat/Unit Area', d.heat_per_unit_area?.toFixed(1) + ' kJ/m2');
-    fp += row('Spread Dir', d.spread_direction?.toFixed(1) + ' deg');
-    fp += row('Delta ROS (AI)', d.delta_ros?.toFixed(4));
-    if (d.ignition_time !== null) fp += row('Ignition Time', d.ignition_time?.toFixed(2) + ' min');
-    fp += row('Burn Duration', d.burn_duration?.toFixed(2) + ' min');
-    fp += row('Burn Elapsed', d.burn_elapsed?.toFixed(2) + ' min');
-    document.getElementById('fireProps').innerHTML = fp;
-  } else {
-    document.getElementById('firePropsPanel').style.display = 'none';
-  }
-
-  document.getElementById('envPropsPanel').style.display = 'block';
-  let ep = '';
-  ep += row('Slope', d.slope_pct?.toFixed(1) + ' %');
-  ep += row('Aspect', d.aspect_deg?.toFixed(1) + ' deg');
-  ep += row('Elevation', d.elevation_m?.toFixed(1) + ' m');
-  ep += row('Wind Speed', d.wind_speed_ms?.toFixed(2) + ' m/s');
-  ep += row('Wind Dir', d.wind_dir_deg?.toFixed(1) + ' deg');
-  ep += row('RH', d.rh_percent?.toFixed(1) + ' %');
-  ep += row('Temp', d.temp_c?.toFixed(1) + ' C');
-  ep += row('Moisture 1h', d.moisture_1h?.toFixed(3));
-  ep += row('Moisture 10h', d.moisture_10h?.toFixed(3));
-  ep += row('Moisture 100h', d.moisture_100h?.toFixed(3));
-  document.getElementById('envProps').innerHTML = ep;
-}
-
-function row(k, v) { return `<div class="row"><span class="k">${k}:</span><span class="v">${v ?? '-'}</span></div>`; }
-
-// ==========================================================================
-// User Actions
-// ==========================================================================
-
-function togglePlay() {
-  if (playing) {
-    playing = false;
-    document.getElementById('btnPlay').textContent = 'PLAY';
-    document.getElementById('btnPlay').classList.remove('active');
-    ws.send(JSON.stringify({ cmd: 'pause' }));
-  } else {
-    playing = true;
-    document.getElementById('btnPlay').textContent = 'PAUSE';
-    document.getElementById('btnPlay').classList.add('active');
-    ws.send(JSON.stringify({ cmd: 'play', speed: parseFloat(document.getElementById('speedSlider').value) }));
-  }
-}
-
-function doStep() { ws.send(JSON.stringify({ cmd: 'step' })); }
-
-function doReset() {
-  playing = false;
-  document.getElementById('btnPlay').textContent = 'PLAY';
-  document.getElementById('btnPlay').classList.remove('active');
-  selectedCell = null;
-  document.getElementById('cellInfo').innerHTML = 'Click on a cell';
-  document.getElementById('firePropsPanel').style.display = 'none';
-  document.getElementById('envPropsPanel').style.display = 'none';
-  ['statPeakFire','statTotalIgn','statDuration','statFinalBurn'].forEach(id => document.getElementById(id).textContent = '-');
-  ws.send(JSON.stringify({ cmd: 'reset' }));
-}
-
-function setSpeed(v) { document.getElementById('speedLabel').textContent = v + 'x'; ws.send(JSON.stringify({ cmd: 'set_speed', speed: parseFloat(v) })); }
-function setDt(v) { document.getElementById('dtLabel').textContent = v + ' min'; ws.send(JSON.stringify({ cmd: 'set_dt', dt: parseFloat(v) })); }
-
-function setOverlay(name) {
-  currentOverlay = name;
-  document.querySelectorAll('.overlay-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
-  updateLegend(name);
-  renderGrid();
-}
-
-function updateLegend(name) {
-  const legends = {
-    state: [['#2d5a27','Unburned'],['#1a8c3c','Active Fire'],['#5c3a1e','Burned'],['#1a3a6e','Firebreak']],
-    ros: [['#1e5a1e','0'],['#b4b41e','4'],['#ff8c00','6'],['#dc2828','8'],['#a000c8','10+']],
-    intensity: [['#1e50b4','0'],['#50b450','4000'],['#ffc81e','8000'],['#ff501e','12000'],['#c80078','16000+']],
-    flame: [['#1e64c8','0'],['#28b450','4'],['#c8c828','8'],['#ff8c1e','12'],['#dc1e1e','16+']],
-    burn_prob: [['#142814','0.0'],['#1e641e','0.2'],['#50b428','0.4'],['#c8c828','0.6'],['#dc3c1e','0.8'],['#ff4d3a','1.0']],
-    slope: [['#285028','0%'],['#64a032','15%'],['#c8b428','30%'],['#c85a1e','45%'],['#a01e1e','60%+']],
-    wind_speed: [['#1e50b4','0 m/s'],['#28a0a0','5'],['#c8c828','10'],['#ff641e','15'],['#c81432','20+']],
-    moisture: [['#b41e1e','0%'],['#c8641e','10%'],['#c8b428','20%'],['#50aa50','30%'],['#1e78b4','40%+']],
-    elevation: [['#28288c','0m'],['#288c28','500'],['#b4b428','1000'],['#b45028','1500'],['#8c2828','2000+']],
-    // Risk maps
-    fire_risk: [['#145014','0.0'],['#3c8c28','0.2'],['#b4b41e','0.4'],['#ff781e','0.6'],['#dc1e1e','0.8'],['#ff4d3a','1.0']],
-    terrain_risk: [['#1e461e','0.0'],['#508228','0.2'],['#b4a01e','0.4'],['#b45a1e','0.6'],['#8c1e1e','0.8'],['#dc3c1e','1.0']],
-    fuel_risk: [['#145014','0.0'],['#328c32','0.2'],['#8cb41e','0.4'],['#c88c1e','0.6'],['#b4281e','0.8'],['#dc1e1e','1.0']],
-    wind_risk: [['#1e50b4','0.0'],['#28a0a0','0.2'],['#c8c828','0.4'],['#ff641e','0.6'],['#c81432','0.8'],['#ff4d3a','1.0']],
-    moisture_risk: [['#1e78b4','0.0'],['#50aa50','0.2'],['#c8c828','0.4'],['#c8641e','0.6'],['#b41e1e','0.8'],['#dc1e1e','1.0']],
-    combined_risk: [['#145014','0.0 Low'],['#328c32','0.2'],['#b4b41e','0.4 Medium'],['#ff781e','0.6 High'],['#dc1e1e','0.8'],['#ff4d3a','1.0 Extreme']],
-  };
-  const items = legends[name] || [];
-  document.getElementById('legend').innerHTML = items.map(([c, l]) => `<div class="legend-item"><div class="legend-swatch" style="background:${c};"></div>${l}</div>`).join('');
-}
-
-function toggleHex() { useHex = document.getElementById('chkHex').checked; resizeCanvas(); }
-
-function queryCell(row, col) {
-  selectedCell = { row, col };
-  ws.send(JSON.stringify({ cmd: 'query_cell', row, col }));
-}
-
-function loadRealData() {
-  const region = document.getElementById('selRegion').value;
-  if (region === 'uniform') { loadUniformGrid(); return; }
-  const rows = parseInt(document.getElementById('cfgRows').value) || 40;
-  const cellSize = parseInt(document.getElementById('cfgCellSize').value) || 10;
-  playing = false;
-  document.getElementById('btnPlay').textContent = 'PLAY';
-  document.getElementById('btnPlay').classList.remove('active');
-  ws.send(JSON.stringify({ cmd: 'load_real_data', region, rows, cols: rows, cell_size_m: cellSize }));
-}
-
-function loadUniformGrid() {
-  const rows = parseInt(document.getElementById('cfgRows').value) || 40;
-  const cellSize = parseInt(document.getElementById('cfgCellSize').value) || 10;
-  const fuel = document.getElementById('cfgFuel').value;
-  const wind = parseFloat(document.getElementById('cfgWind').value) || 5;
-  const windDir = parseFloat(document.getElementById('cfgWindDir').value) || 270;
-  const slope = parseFloat(document.getElementById('cfgSlope').value) || 0;
-  const moisture = parseFloat(document.getElementById('cfgMoisture').value) || 0.06;
-  playing = false;
-  document.getElementById('btnPlay').textContent = 'PLAY';
-  document.getElementById('btnPlay').classList.remove('active');
-  ws.send(JSON.stringify({
-    cmd: 'configure', rows, cols: rows, cell_size_m: cellSize,
-    fuel_code: fuel, wind_speed_ms: wind, wind_dir_deg: windDir,
-    slope_pct: slope, moisture_1h: moisture,
-  }));
-}
-
-// ==========================================================================
-// Mouse Events
-// ==========================================================================
-
-function getCellFromMouse(e) {
-  const rect = wrap.getBoundingClientRect();
-  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-  if (!sim.grid.length) return null;
-
-  if (useHex) {
-    let best = null, bestDist = Infinity;
-    const rows = sim.grid.length, cols = sim.grid[0].length;
-    for (let i = 0; i < rows; i++) {
-      for (let j = 0; j < cols; j++) {
-        const [cx, cy] = hexCenter(i, j);
-        const d = (mx - cx) ** 2 + (my - cy) ** 2;
-        if (d < bestDist) { bestDist = d; best = { row: i, col: j }; }
-      }
-    }
-    if (best && bestDist < (cellSize * 0.5) ** 2) return best;
-    return null;
-  } else {
-    const col = Math.floor((mx - offsetX) / cellSize);
-    const row = Math.floor((my - offsetY) / cellSize);
-    if (row < 0 || row >= sim.grid.length || col < 0 || col >= sim.grid[0].length) return null;
-    return { row, col };
-  }
-}
-
-wrap.addEventListener('click', (e) => {
-  const cell = getCellFromMouse(e);
-  if (cell) { queryCell(cell.row, cell.col); renderGrid(); }
-});
-
-wrap.addEventListener('dblclick', (e) => {
-  const cell = getCellFromMouse(e);
-  if (cell) ws.send(JSON.stringify({ cmd: 'ignite', row: cell.row, col: cell.col }));
-});
-
-wrap.addEventListener('mousemove', (e) => {
-  const cell = getCellFromMouse(e);
-  if (!cell || !sim.grid.length) { document.getElementById('tooltip').style.display = 'none'; return; }
-  const state = sim.grid[cell.row]?.[cell.col];
-  const ros = sim.ros_grid[cell.row]?.[cell.col];
-  const prob = burnProbGrid[cell.row]?.[cell.col];
-  const wind = sim.env.wind_speed?.[cell.row]?.[cell.col];
-  const slope = sim.env.slope_pct?.[cell.row]?.[cell.col];
-
-  // Risk values
-  const combinedRisk = sim.risk.combined_risk?.[cell.row]?.[cell.col];
-  const fireRisk = sim.risk.fire_risk?.[cell.row]?.[cell.col];
-  const terrainRisk = sim.risk.terrain_risk?.[cell.row]?.[cell.col];
-  const fuelRisk = sim.risk.fuel_risk?.[cell.row]?.[cell.col];
-
-  const sn = { 0: 'Unburned', 1: 'ACTIVE FIRE', 2: 'Burned', 3: 'Firebreak' };
-  let tt = `<div class="tt-title">(${cell.row}, ${cell.col}) ${sn[state] || state}</div>`;
-  if (prob !== undefined) tt += `<div class="tt-row"><span class="tt-k">P(burn):</span><span class="tt-v" style="color:${prob > 0.5 ? '#ffdd44' : '#aacc88'}">${prob.toFixed(2)}</span></div>`;
-  if (ros > 0) tt += `<div class="tt-row"><span class="tt-k">ROS:</span><span class="tt-v">${ros.toFixed(2)} m/min</span></div>`;
-  if (combinedRisk !== undefined) {
-    const riskColor = combinedRisk > 0.7 ? '#ff4d3a' : combinedRisk > 0.4 ? '#ffaa33' : '#44cc44';
-    tt += `<div class="tt-row"><span class="tt-k">Risk:</span><span class="tt-v" style="color:${riskColor}">${(combinedRisk * 100).toFixed(0)}%</span></div>`;
-    tt += `<div class="tt-row"><span class="tt-k">  Fire:</span><span class="tt-v">${(fireRisk * 100).toFixed(0)}%</span></div>`;
-    tt += `<div class="tt-row"><span class="tt-k">  Terrain:</span><span class="tt-v">${(terrainRisk * 100).toFixed(0)}%</span></div>`;
-    tt += `<div class="tt-row"><span class="tt-k">  Fuel:</span><span class="tt-v">${(fuelRisk * 100).toFixed(0)}%</span></div>`;
-  }
-  if (wind !== undefined) tt += `<div class="tt-row"><span class="tt-k">Wind:</span><span class="tt-v">${wind.toFixed(1)} m/s</span></div>`;
-  if (slope !== undefined) tt += `<div class="tt-row"><span class="tt-k">Slope:</span><span class="tt-v">${slope.toFixed(1)}%</span></div>`;
-
-  const tooltip = document.getElementById('tooltip');
-  tooltip.innerHTML = tt;
-  tooltip.style.display = 'block';
-  tooltip.style.left = (e.clientX - wrap.getBoundingClientRect().left + 14) + 'px';
-  tooltip.style.top = (e.clientY - wrap.getBoundingClientRect().top - 10) + 'px';
-});
-
-wrap.addEventListener('mouseleave', () => { document.getElementById('tooltip').style.display = 'none'; });
-
-let panning = false, panX = 0, panY = 0;
-wrap.addEventListener('mousedown', (e) => { if (e.button === 1) { panning = true; panX = e.clientX - offsetX; panY = e.clientY - offsetY; e.preventDefault(); } });
-window.addEventListener('mousemove', (e) => { if (panning) { offsetX = e.clientX - panX; offsetY = e.clientY - panY; renderGrid(); } });
-window.addEventListener('mouseup', () => { panning = false; });
-wrap.addEventListener('wheel', (e) => { e.preventDefault(); cellSize = Math.max(4, Math.min(80, cellSize * (e.deltaY > 0 ? 0.92 : 1.08))); renderGrid(); });
-
-// ==========================================================================
-// Init
-// ==========================================================================
-
-window.addEventListener('resize', resizeCanvas);
-initCharts();
 connect();
-resizeCanvas();
 </script>
 </body>
 </html>

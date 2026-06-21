@@ -9,6 +9,7 @@ Supporte également la simulation d'ensemble stochastique.
 """
 
 import numpy as np
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import sys, os
 
@@ -18,6 +19,27 @@ from burntrack.engine.rothermel import (
     RothermelEngine, FuelModel as RothFuelModel, 
     MoistureInputs, EnvironmentalConditions, RothermelOutput
 )
+
+
+def _angular_diff(a_deg: float, b_deg: float) -> float:
+    """Différence angulaire absolue entre deux angles (degrés), résultat dans [0, 180]."""
+    diff = abs((a_deg - b_deg + 360.0) % 360.0)
+    return diff if diff <= 180.0 else 360.0 - diff
+
+
+def _max_spread_direction(wind_dir_deg: float, slope_aspect_deg: float,
+                           wind_speed: float, slope_pct: float) -> float:
+    """Direction de propagation maximale (degrés) — combinaison vent + pente."""
+    # Pondération simple vent/pente
+    wind_weight = wind_speed / (wind_speed + slope_pct / 10.0 + 1e-6)
+    slope_weight = 1.0 - wind_weight
+    # Direction dans laquelle le feu se propage (opposée au vent, dans le sens de la pente)
+    wind_spread = (wind_dir_deg + 180.0) % 360.0
+    slope_spread = slope_aspect_deg  # feu monte dans la direction de l'aspect
+    # Moyenne pondérée circulaire approximative
+    dx = wind_weight * np.cos(np.radians(wind_spread)) + slope_weight * np.cos(np.radians(slope_spread))
+    dy = wind_weight * np.sin(np.radians(wind_spread)) + slope_weight * np.sin(np.radians(slope_spread))
+    return float(np.degrees(np.arctan2(dy, dx)) % 360.0)
 
 
 def _to_roth_fuel(fm) -> RothFuelModel:
@@ -48,9 +70,10 @@ class PropagationRules:
     Règles physiques régissant le passage du feu de cellule en cellule.
     """
 
-    def __init__(self, use_corrector: bool = True):
+    def __init__(self, use_corrector: bool = True, stochastic: bool = True):
         self.engine = RothermelEngine()
         self.use_corrector = use_corrector
+        self.stochastic = stochastic
 
     def compute_cell_ros(self, cell: Cell, grid: Grid) -> RothermelOutput:
         """Calcule la vitesse de propagation brute (Rothermel v3) pour une cellule."""
@@ -155,9 +178,10 @@ class PropagationRules:
             cell = grid.cells[i][j]
             cell.state = CellState.BURNING
             cell.ignition_time = dt_min  # sera ajusté par le runner principal
-            # Calcul de sa propre durée de combustion pour sa future extinction
+            # Calcul de sa propre durée de combustion via le temps de résidence Rothermel (tau)
             out = self.compute_cell_ros(cell, grid)
-            cell.burn_duration = max(1.0, out.fuel_consumption / (out.ros + 1e-5))
+            tau = getattr(out, 'tau', None) or getattr(out, 'residence_time', None)
+            cell.burn_duration = max(10.0, float(tau)) if tau else 15.0
 
         return new_ignitions
 
@@ -416,6 +440,4 @@ class EnsembleSimulation:
 
             if verbose and (k + 1) % max(1, self.n // 10) == 0:
                 pct = (k + 1) / self.n * 100
-                print(f"[Ensemble] {k+1:4d}/{self.n} ({pct:.0f}%)")
-
-        return burn_count / self.n
+                p
