@@ -209,12 +209,17 @@ class SimulationServer:
     # Generation des donnees par cellule
     # ------------------------------------------------------------------
 
-    def _compute_ros_grid(self) -> List[List[float]]:
-        """Calcule le ROS maximal pour chaque cellule (pour heatmap)."""
+    def _compute_fire_grids(self) -> dict:
+        """
+        Calcule ROS, intensite et longueur de flamme en une seule passe.
+        Remplace les 3 boucles separees pour 3x moins de calcul Rothermel.
+        """
         if self.grid is None:
-            return []
+            return {"ros_grid": [], "intensity_grid": [], "flame_length_grid": []}
         rows, cols = self.grid.rows, self.grid.cols
-        ros_grid = [[0.0] * cols for _ in range(rows)]
+        ros_grid       = [[0.0] * cols for _ in range(rows)]
+        intensity_grid = [[0.0] * cols for _ in range(rows)]
+        flame_grid     = [[0.0] * cols for _ in range(rows)]
         engine = RothermelEngine()
 
         for i in range(rows):
@@ -225,85 +230,28 @@ class SimulationServer:
                 fm_raw = self.grid.get_fuel(c.fuel_code)
                 if fm_raw is None:
                     continue
-                fuel = _to_roth_fuel(fm_raw)
-                wind_prop_dir = (c.wind_dir_deg + 180.0) % 360.0
-                angle_wind_slope = _angular_diff(wind_prop_dir, c.aspect_deg)
-                conditions = EnvironmentalConditions(
-                    wind_speed=c.wind_speed_ms,
-                    slope_pct=c.slope_pct,
-                    angle_wind_slope=angle_wind_slope,
-                )
                 try:
+                    fuel = _to_roth_fuel(fm_raw)
+                    wind_prop_dir    = (c.wind_dir_deg + 180.0) % 360.0
+                    angle_wind_slope = _angular_diff(wind_prop_dir, c.aspect_deg)
+                    conditions = EnvironmentalConditions(
+                        wind_speed=c.wind_speed_ms,
+                        slope_pct=c.slope_pct,
+                        angle_wind_slope=angle_wind_slope,
+                    )
                     output = engine.compute(fuel, c.moisture, conditions)
-                    ros_eff = max(output.ros + getattr(c, 'delta_ros', 0.0), 0.0)
-                    max_dir = _max_spread_direction(c.wind_dir_deg, c.slope_pct, c.aspect_deg)
-                    # ROS max (direction du vent+pente)
-                    ros_grid[i][j] = round(ros_eff, 3)
+                    ros_grid[i][j]       = round(max(output.ros + getattr(c, "delta_ros", 0.0), 0.0), 3)
+                    intensity_grid[i][j] = round(output.fireline_intensity, 2)
+                    flame_grid[i][j]     = round(output.flame_length, 3)
                 except Exception:
-                    ros_grid[i][j] = 0.0
-        return ros_grid
+                    pass
 
-    def _compute_intensity_grid(self) -> List[List[float]]:
-        """Calcule l'intensite de Byram pour chaque cellule BURNING."""
-        if self.grid is None:
-            return []
-        rows, cols = self.grid.rows, self.grid.cols
-        grid = [[0.0] * cols for _ in range(rows)]
-        engine = RothermelEngine()
+        return {
+            "ros_grid": ros_grid,
+            "intensity_grid": intensity_grid,
+            "flame_length_grid": flame_grid,
+        }
 
-        for i in range(rows):
-            for j in range(cols):
-                c = self.grid.cells[i][j]
-                if c.state != CellState.BURNING:
-                    continue
-                fm_raw = self.grid.get_fuel(c.fuel_code)
-                if fm_raw is None:
-                    continue
-                fuel = _to_roth_fuel(fm_raw)
-                wind_prop_dir = (c.wind_dir_deg + 180.0) % 360.0
-                angle_wind_slope = _angular_diff(wind_prop_dir, c.aspect_deg)
-                conditions = EnvironmentalConditions(
-                    wind_speed=c.wind_speed_ms,
-                    slope_pct=c.slope_pct,
-                    angle_wind_slope=angle_wind_slope,
-                )
-                try:
-                    output = engine.compute(fuel, c.moisture, conditions)
-                    grid[i][j] = round(output.fireline_intensity, 2)
-                except Exception:
-                    grid[i][j] = 0.0
-        return grid
-
-    def _compute_flame_grid(self) -> List[List[float]]:
-        """Calcule la longueur de flamme pour chaque cellule BURNING."""
-        if self.grid is None:
-            return []
-        rows, cols = self.grid.rows, self.grid.cols
-        grid = [[0.0] * cols for _ in range(rows)]
-        engine = RothermelEngine()
-
-        for i in range(rows):
-            for j in range(cols):
-                c = self.grid.cells[i][j]
-                if c.state != CellState.BURNING:
-                    continue
-                fm_raw = self.grid.get_fuel(c.fuel_code)
-                if fm_raw is None:
-                    continue
-                fuel = _to_roth_fuel(fm_raw)
-                wind_prop_dir = (c.wind_dir_deg + 180.0) % 360.0
-                angle_wind_slope = _angular_diff(wind_prop_dir, c.aspect_deg)
-                conditions = EnvironmentalConditions(
-                    wind_speed=c.wind_speed_ms,
-                    slope_pct=c.slope_pct,
-                    angle_wind_slope=angle_wind_slope,
-                )
-                try:
-                    output = engine.compute(fuel, c.moisture, conditions)
-                    grid[i][j] = round(output.flame_length, 3)
-                except Exception:
-                    grid[i][j] = 0.0
-        return grid
 
     def _compute_env_grids(self) -> dict:
         """Retourne les grilles environnementales pour les overlays."""
@@ -320,11 +268,10 @@ class SimulationServer:
         }
 
     def _compute_risk_grids(self) -> dict:
-        """Calcule les cartes de risque pour chaque cellule."""
+        """Calcule les cartes de risque pour chaque cellule (sans appels Rothermel)."""
         if self.grid is None:
             return {}
         rows, cols = self.grid.rows, self.grid.cols
-        engine = RothermelEngine()
 
         fire_risk = [[0.0] * cols for _ in range(rows)]
         terrain_risk = [[0.0] * cols for _ in range(rows)]
@@ -367,23 +314,18 @@ class SimulationServer:
                 moisture_factor = max(0, 1.0 - m1h * 2.0)
                 moisture_risk[i][j] = round(moisture_factor, 3)
 
-                # === FIRE RISK (ROS Rothermel) ===
+                # === FIRE RISK (proxy rapide sans Rothermel) ===
+                # Utilise : charge fine * SAV * vent / humidite
+                # Evite 2500+ appels Rothermel par requete — delta_ros MLP inclus
                 if fm_raw is not None:
-                    try:
-                        fuel = _to_roth_fuel(fm_raw)
-                        wind_prop_dir = (c.wind_dir_deg + 180.0) % 360.0
-                        angle_wind_slope = _angular_diff(wind_prop_dir, c.aspect_deg)
-                        conditions = EnvironmentalConditions(
-                            wind_speed=c.wind_speed_ms,
-                            slope_pct=c.slope_pct,
-                            angle_wind_slope=angle_wind_slope,
-                        )
-                        output = engine.compute(fuel, c.moisture, conditions)
-                        ros = max(output.ros + getattr(c, 'delta_ros', 0.0), 0.0)
-                        # Normaliser le ROS (0-15 m/min = risque 0-1)
-                        fire_risk[i][j] = round(min(1.0, ros / 15.0), 3)
-                    except Exception:
-                        fire_risk[i][j] = 0.0
+                    sav        = max(fm_raw.sigma_1h, 1.0)
+                    w_fine     = fm_raw.w_1h + fm_raw.w_live_herb
+                    wind       = c.wind_speed_ms
+                    m1h        = max(c.moisture.m_1h, 0.01)
+                    proxy_ros  = (w_fine * sav * wind) / (m1h * 10000.0)
+                    # Ajouter delta_ros MLP pre-calcule si disponible
+                    proxy_ros  = max(0.0, proxy_ros + c.delta_ros / 15.0)
+                    fire_risk[i][j] = round(min(1.0, proxy_ros), 3)
 
                 # === COMBINED RISK (score composite) ===
                 # Poids: terrain 20%, fuel 25%, wind 20%, moisture 15%, fire 20%
@@ -425,12 +367,12 @@ class SimulationServer:
             "moisture_100h": round(c.moisture.m_100h, 3),
             "moisture_live_herb": round(c.moisture.m_live_herb, 3),
             "moisture_live_woody": round(c.moisture.m_live_woody, 3),
-            "rh_percent": round(c.rh_percent, 1),
-            "temp_c": round(c.temp_c, 1),
+            "rh_percent": round(getattr(c, "rh_percent", 50.0), 1),
+            "temp_c": round(getattr(c, "temp_c", 25.0), 1),
             "ignition_time": round(c.ignition_time, 2) if c.ignition_time is not None else None,
             "burn_duration": round(c.burn_duration, 2),
             "burn_elapsed": round(c.burn_elapsed, 2),
-            "delta_ros": round(c.delta_ros, 4),
+            "delta_ros": round(getattr(c, "delta_ros", 0.0), 4),
         }
         if fm_raw is not None:
             data["fuel_name"] = fm_raw.name
@@ -477,7 +419,7 @@ class SimulationServer:
         # Stats courantes
         burning = self.grid.burning_count() if self.grid else 0
         fraction = self.grid.burned_fraction() if self.grid else 0.0
-        new_ign = self.sim.stats.new_ignitions[-1] if self.sim.stats.new_ignitions else 0
+        new_ign = self.sim.stats.new_ignitions[-1] if self.sim and self.sim.stats.new_ignitions else 0
         ros_avg = 0.0
         intensity_avg = 0.0
         flame_avg = 0.0
@@ -525,14 +467,14 @@ class SimulationServer:
         self.stats_history["intensity_avg"].append(intensity_avg)
         self.stats_history["flame_avg"].append(flame_avg)
 
+        fire_grids = self._compute_fire_grids()
+
         return {
             "type": "frame",
             "time_min": round(self.sim.current_time, 1),
             "step": self.sim.step_count,
             "grid": grid_arr,
-            "ros_grid": self._compute_ros_grid(),
-            "intensity_grid": self._compute_intensity_grid(),
-            "flame_length_grid": self._compute_flame_grid(),
+            **fire_grids,
             "stats": {
                 "burning": burning,
                 "burned_frac": round(fraction, 5),
@@ -547,7 +489,7 @@ class SimulationServer:
     # Boucle de simulation
     # ------------------------------------------------------------------
 
-     async def simulation_loop(self):
+    async def simulation_loop(self):
         """Boucle principale : avance la simulation et broadcast les frames."""
         if self.grid and self.grid.burning_count() == 0:
             self.running = False
@@ -743,6 +685,42 @@ class SimulationServer:
                 **self.stats_history,
             }))
 
+        elif cmd == "run_ensemble":
+            # Lance N simulations perturbees et retourne la carte de probabilite
+            if self.grid is None:
+                await websocket.send(json.dumps({"type": "error", "msg": "Grille non configuree"}))
+                return
+            from cellular_automaton.rules import EnsembleSimulation, PerturbationConfig
+            n = int(msg.get("n_ensemble", 50))
+            ignite_at = msg.get("ignite_at", None)
+            if ignite_at:
+                ignite_at = tuple(ignite_at)
+            await websocket.send(json.dumps({
+                "type": "ensemble_start",
+                "n_ensemble": n,
+                "message": f"Lancement de {n} simulations...",
+            }))
+            try:
+                import copy
+                ens = EnsembleSimulation(
+                    base_grid=copy.deepcopy(self.grid),
+                    n_ensemble=n,
+                    rules=self.rules,
+                    seed=42,
+                )
+                steps = self.max_steps
+                prob_map = ens.run(steps=steps, dt=self.dt, ignite_at=ignite_at)
+                summary = EnsembleSimulation.prob_summary(prob_map)
+                await websocket.send(json.dumps({
+                    "type": "ensemble_result",
+                    "prob_map": prob_map.tolist(),
+                    "summary": summary,
+                    "rows": self.grid.rows,
+                    "cols": self.grid.cols,
+                }, default=str))
+            except Exception as e:
+                await websocket.send(json.dumps({"type": "error", "msg": str(e)}))
+
         elif cmd == "get_real_regions":
             import pandas as pd
             csv_path = os.path.join(os.path.dirname(__file__), "..", "data", "processed", "african_ground_truth.csv")
@@ -785,26 +763,48 @@ def main():
     # Servir aussi le fichier HTML via HTTP
     html_path = os.path.join(os.path.dirname(__file__), "index.html")
 
+    import mimetypes
+    static_dir = os.path.dirname(html_path)
+
     async def serve_http(reader, writer):
         try:
             data = await reader.read(4096)
-            request_line = data.decode().split('\r\n')[0]
-            method, path, _ = request_line.split(' ', 2)
+            request_line = data.decode(errors="replace").split('\r\n')[0]
+            parts = request_line.split(' ')
+            if len(parts) < 2:
+                writer.write(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+                await writer.drain()
+                writer.close()
+                return
+
+            path = parts[1].split('?')[0]   # strip query string
 
             if path == '/' or path == '/index.html':
-                content_type = 'text/html; charset=utf-8'
-                with open(html_path, 'rb') as f:
-                    body = f.read()
+                file_path = html_path
             elif path == '/favicon.ico':
                 writer.write(b"HTTP/1.1 204 No Content\r\n\r\n")
                 await writer.drain()
                 writer.close()
                 return
             else:
+                # Serve any static file from the visualization directory
+                file_path = os.path.normpath(os.path.join(static_dir, path.lstrip('/')))
+                # Security: prevent directory traversal
+                if not file_path.startswith(os.path.abspath(static_dir)):
+                    writer.write(b"HTTP/1.1 403 Forbidden\r\n\r\n")
+                    await writer.drain()
+                    writer.close()
+                    return
+
+            if not os.path.isfile(file_path):
                 writer.write(b"HTTP/1.1 404 Not Found\r\n\r\n")
                 await writer.drain()
                 writer.close()
                 return
+
+            content_type = mimetypes.guess_type(file_path)[0] or 'application/octet-stream'
+            with open(file_path, 'rb') as f:
+                body = f.read()
 
             response = (
                 f"HTTP/1.1 200 OK\r\n"
@@ -816,7 +816,7 @@ def main():
             writer.write(response)
             await writer.drain()
             writer.close()
-        except Exception as e:
+        except Exception:
             try:
                 writer.write(b"HTTP/1.1 500 Internal Server Error\r\n\r\n")
                 await writer.drain()
@@ -825,16 +825,14 @@ def main():
                 pass
 
     async def run_servers():
-        # WebSocket server
         ws_server = await websockets.serve(server.handler, args.host, args.port)
         print(f"WebSocket actif sur ws://{args.host}:{args.port}")
 
-        # HTTP server sur port+1
         http_port = args.port + 1
         http_server = await asyncio.start_server(serve_http, args.host, http_port)
         print(f"HTML accessible sur http://localhost:{http_port}")
         print()
-        print("Ouvrez le navigateur sur http://localhost:8766")
+        print(f"Ouvrez le navigateur sur http://localhost:{http_port}")
 
         await asyncio.gather(
             ws_server.wait_closed(),
