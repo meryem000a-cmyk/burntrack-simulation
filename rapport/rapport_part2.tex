@@ -1,0 +1,528 @@
+% rapport_part2.tex — Réalisation, Résultats, Conclusion
+% Inclus par \input{rapport_part2} dans le fichier principal
+
+% ============================================================
+% 4.5 RÉALISATION ET TESTS
+% ============================================================
+\subsection{Réalisation et tests}
+
+\subsubsection{Moteur Rothermel v3}
+
+Le moteur Rothermel implémenté dans BurnTrack constitue une réécriture complète en Python (596 lignes) du modèle original, intégrant six corrections majeures identifiées dans la littérature~:
+
+\begin{enumerate}[nosep]
+    \item \textbf{Vitesse de réaction complète} (Albini, 1976)~: le facteur de correction $(\beta/\beta_{opt})^A \cdot \exp[A(1-\beta/\beta_{opt})]$ est appliqué à la vitesse de réaction maximale $\gamma_{max}$, au lieu de la formule simplifiée.
+    \item \textbf{Composition vectorielle vent/pente} (Catchpole, 1982)~: les coefficients $\phi_w$ et $\phi_s$ sont composés vectoriellement plutôt que simplement additionnés, tenant compte de l'angle relatif entre la direction du vent et l'aspect de la pente~:
+    \begin{equation}
+    \phi_{eff} = \sqrt{(\phi_w + \phi_s \cos\theta)^2 + (\phi_s \sin\theta)^2}
+    \end{equation}
+    \item \textbf{Intensité de Byram} : $I_B = I_R \times \tau \times R$ (kW/m).
+    \item \textbf{Amortissement logarithmique du vent} pour les SAV élevés ($\sigma > 2500$ ft$^{-1}$), avec saturation douce~: $\phi_w^* = \Phi_{cap} \cdot (1 - e^{-\phi_w / \Phi_{cap}})$, $\Phi_{cap} = 25$.
+    \item \textbf{Humidité d'extinction du vivant} affinée selon Albini (1976)~: $M_{x,live} = 2{,}9 \cdot f_{live}^{1,5} \cdot m_{x,dead}^{-0,5}$.
+    \item \textbf{Coefficient de pente}~: utilisation de $\tan(\theta)^2$ au lieu de $(\%/100)^2$ dans la formule standard $\phi_s = 5{,}275 \cdot \beta^{-0,3} \cdot \tan^2(\theta)$.
+\end{enumerate}
+
+Le moteur prend en entrée un modèle de combustible (15 paramètres), les humidités par classe de temps (5 valeurs), et les conditions environnementales (vent, pente, angle relatif). Il produit 18 grandeurs de sortie incluant le ROS, l'intensité de ligne de feu, la longueur de flamme, les temps de résidence, et les coefficients intermédiaires.
+
+\subsubsection{Automate cellulaire stochastique}
+
+L'automate cellulaire modélise la propagation spatiale du feu sur une grille régulière. Chaque cellule est caractérisée par~:
+
+\begin{itemize}[nosep]
+    \item Un état parmi \{UNBURNED, BURNING, BURNED, FIREBREAK\}
+    \item Un modèle de combustible (parmi les 50 disponibles)
+    \item Des conditions environnementales locales (vent, humidité, pente)
+    \item Un terme de correction $\Delta$ROS issu du correcteur ML
+\end{itemize}
+
+La probabilité d'ignition d'une cellule voisine sur un pas de temps $\Delta t$ suit une loi exponentielle~:
+\begin{equation}
+P_{ign} = 1 - \exp\left(-\frac{\Delta t \cdot R_{dir}}{d}\right)
+\end{equation}
+où $d$ est la distance inter-centres et $R_{dir}$ le ROS dans la direction du voisin, modulé par l'angle avec la direction de propagation maximale. Le voisinage de Moore (8 cellules) est utilisé.
+
+\paragraph{Simulation d'ensemble.} Pour quantifier l'incertitude, un module de simulation d'ensemble exécute $N$ réalisations stochastiques (typiquement $N=50$) en perturbant les conditions aux limites selon des distributions paramétrables~:
+\begin{itemize}[nosep]
+    \item Vitesse du vent~: $\mathcal{N}(0, 0{,}20)$ (relatif)
+    \item Direction du vent~: $\mathcal{N}(0^\circ, 15^\circ)$
+    \item Humidité 1h~: $\mathcal{N}(0, 0{,}02)$ (absolu)
+    \item Charge de combustible~: $\mathcal{N}(0, 0{,}15)$ (relatif)
+\end{itemize}
+Le résultat est une carte de probabilité de brûlage par cellule.
+
+\subsubsection{Correcteur par apprentissage automatique}
+
+Le correcteur ML vise à compenser le biais systématique du modèle Rothermel par rapport aux observations terrain. Nous avons exploré plusieurs architectures~:
+
+\paragraph{Données d'entraînement.} Le dataset est constitué de~:
+\begin{itemize}[nosep]
+    \item 1\,840 observations réelles issues de 7 études publiées (Savadogo 2014, Govender 2006, Frost 1987, Hoffa 1999, Hely 2003, Trollope 1985, Shea 1996)
+    \item 6\,988 données synthétiques générées à partir de la physique
+    \item 53 colonnes par échantillon, réduites à 8 features physiques
+\end{itemize}
+
+Un problème majeur identifié lors du développement est le risque de \textit{fuite d'information} par le fuel encoding~: l'utilisation d'un target encoding par type de combustible permettait au modèle d'atteindre un $R^2$ artificiel de 0,97 sans apprendre la physique sous-jacente. La suppression du fuel encoding et le passage à des features purement physiques a résolu ce problème.
+
+\paragraph{Architecture MLP retenue.} Le réseau de neurones final utilise 8 features d'entrée (wind\_speed\_ms, rh\_percent, slope\_pct, ros\_rothermel, h\_dead\_kj\_kg, sigma\_m2\_m3, m\_live\_woody, mx\_percent), avec une architecture 8$\rightarrow$64$\rightarrow$32$\rightarrow$1 prédisant le $\Delta$ROS~:
+
+\begin{table}[H]
+\centering
+\caption{Performance du correcteur MLP --- dataset de littérature (1\,840 obs., 7 études publiées)}
+\begin{tabular}{|l|c|c|}
+\hline
+\rowcolor{NavyBlue} \textcolor{white}{\textbf{Métrique}} & \textcolor{white}{\textbf{Rothermel brut}} & \textcolor{white}{\textbf{MLP corrigé}} \\
+\hline
+$R^2$ (ROS final) & 0,8298 & \textbf{0,9868} \\
+MAE (m/min) & 4,41 & \textbf{0,735} \\
+RMSE (m/min) & --- & 1,319 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Performance du correcteur MLP --- données satellites réelles FIRMS (Afrique du Sud, 2\,866 obs.)}
+\begin{tabular}{|l|c|c|}
+\hline
+\rowcolor{NavyBlue} \textcolor{white}{\textbf{Métrique}} & \textcolor{white}{\textbf{Rothermel brut}} & \textcolor{white}{\textbf{MLP corrigé}} \\
+\hline
+$R^2$ (ROS final) & $-0{,}05$ & \textbf{0,12} \\
+MAE (m/min) & 5,02 & 5,38 \\
+RMSE (m/min) & 9,50 & 8,67 \\
+\hline
+\end{tabular}
+\end{table}
+
+\paragraph{Transparence sur les deux régimes de validation.} Les deux tableaux ci-dessus correspondent à deux régimes distincts. Le premier reflète la capacité du correcteur à apprendre les biais documentés de Rothermel sur un corpus \textit{curaté} d'études terrain publiées (conditions contrôlées, ROS mesuré expérimentalement). Le second évalue le même correcteur sur des détections de feu satellites réelles (NASA FIRMS MODIS/VIIRS) recoupées avec réanalyse météo ERA5-Land, pente SRTM et occupation du sol ESA WorldCover~: la reconstruction du ROS observé à partir de détections ponctuelles introduit une incertitude structurelle bien supérieure, et le $R^2$ s'effondre. Ce \textit{gap} est attendu~: les données FIRMS fournissent des points d'ignition et non des fronts continus, et la variable cible ($\Delta$ROS) y est par construction plus bruitée. La piste d'amélioration est discutée en section~\ref{sec:limites}.
+
+\begin{table}[H]
+\centering
+\caption{Performance par source de données}
+\begin{tabular}{|l|c|c|c|}
+\hline
+\rowcolor{NavyBlue} \textcolor{white}{\textbf{Source}} & \textcolor{white}{\textbf{$R^2$}} & \textcolor{white}{\textbf{MAE (m/min)}} & \textcolor{white}{\textbf{$n$}} \\
+\hline
+Savadogo 2014 & 0,989 & 0,39 & 160 \\
+Govender 2006 & 0,946 & 0,73 & 480 \\
+Frost 1987 & 0,944 & 0,50 & 160 \\
+Hoffa 1999 & 0,888 & 0,73 & 120 \\
+Hely 2003 & 0,782 & 0,36 & 400 \\
+Trollope 1985 & 0,537 & 1,82 & 320 \\
+Shea 1996 & 0,163 & 0,24 & 200 \\
+\hline
+\end{tabular}
+\end{table}
+
+Les sources Trollope et Shea présentent un $R^2$ faible car le Rothermel brut est déjà performant pour ces sources (ratio $\approx 1{,}0$), laissant peu de marge de correction au MLP.
+
+\subsubsection{Navigation autonome --- D* Lite}
+
+Le module de navigation utilise l'algorithme D* Lite (Koenig \& Likhachev, 2002) pour planifier le chemin du rover en évitant le front de feu. D* Lite est un planificateur de chemin \textit{incrémental} qui, contrairement à A*, ne recalcule pas l'intégralité du chemin lorsque l'environnement change --- seuls les sommets affectés sont mis à jour.
+
+\paragraph{Carte de risque.} Un algorithme de Dijkstra multi-sources calcule le temps d'arrivée du feu $t_{\text{arrive}}(i,j)$ pour chaque cellule, en partant de toutes les cellules en feu simultanément. Le temps de traversée de chaque arête est $d / R_{dir}$.
+
+\paragraph{Coûts d'arête.} Les coûts de déplacement du robot intègrent le risque incendie~:
+\begin{itemize}[nosep]
+    \item Cellule en feu ou brûlée~: $c = \infty$ (infranchissable)
+    \item $t_{\text{arrive}} - t_{\text{courant}} < m_{\text{sécurité}}$~: $c = \infty$ (trop dangereux)
+    \item $t_{\text{arrive}}$ dans $[m, 2m]$~: $c = d \times 4$ (zone à risque, pénalité)
+    \item Coupe-feu~: $c = d \times 0{,}5$ (couloir préféré)
+    \item Cellule sûre~: $c = d$ (coût nominal)
+\end{itemize}
+
+\paragraph{Planification multi-waypoints.} Le module WaypointPlanner sélectionne les 20 cellules les plus sèches (NDVI le plus faible) comme points d'échantillonnage prioritaires, avec un espacement minimum de 4 cellules. Le robot parcourt ces waypoints dans l'ordre d'un tour glouton, avec re-planification toutes les 5 étapes et saut automatique des waypoints bloqués par le feu.
+
+\subsubsection{Pipeline de vision artificielle}
+
+Le pipeline de vision s'exécute en deux étapes sur le Raspberry Pi 4~:
+
+\begin{enumerate}[nosep]
+    \item \textbf{Classification botanique} --- YOLOv8/11 exporté en ONNX FP16 ($\sim$20~Mo)~: identifie le genre botanique parmi 17 catégories (Acacia, Adansonia, Aloe, Brachystegia, etc.)
+    \item \textbf{Détection de sécheresse} --- CNN exporté en ONNX FP32 ($\sim$1,5~Mo)~: classifie l'état hydrique en \textit{dry} (sec) ou \textit{alive} (vivant)
+\end{enumerate}
+
+Le genre identifié est directement mappé au modèle de combustible Rothermel correspondant. L'état de sécheresse est traduit en paramètre LHMC (\textit{Live Herbaceous Moisture Content})~: l'état ``dry'' indique un taux de curing élevé (LHMC $< 98$\,\%), provoquant un transfert de charge vers le combustible mort 1h et accélérant significativement la propagation simulée.
+
+L'utilisation d'ONNX Runtime permet l'inférence sans dépendance à PyTorch, réduisant l'empreinte mémoire sur le dispositif embarqué.
+
+\subsubsection{Protocole de communication LoRa}
+
+La communication entre le rover et la station de base utilise un module RFM95W (SX1276) opérant à 868~MHz en modulation LoRa (SF7, BW125, CR4/5). Les messages sont encodés en CBOR et encapsulés dans un protocole applicatif personnalisé~:
+
+\begin{table}[H]
+\centering
+\caption{Types de messages LoRa}
+\begin{tabular}{|l|l|l|c|}
+\hline
+\rowcolor{NavyBlue} \textcolor{white}{\textbf{Direction}} & \textcolor{white}{\textbf{Type}} & \textcolor{white}{\textbf{Contenu}} & \textcolor{white}{\textbf{Taille}} \\
+\hline
+Rover $\rightarrow$ Base & TELEMETRY & Position, capteurs, vision, batterie & $\sim$120~o \\
+Rover $\rightarrow$ Base & HEARTBEAT & Pose + état + RSSI & $\sim$50~o \\
+Rover $\rightarrow$ Base & ALERT & Obstacle, géofence, batterie faible & $\sim$40~o \\
+Base $\rightarrow$ Rover & TARGET\_UPDATE & Liste de waypoints GPS & Variable \\
+Base $\rightarrow$ Rover & STOP / RESUME & Contrôle d'urgence & $\sim$20~o \\
+\hline
+\end{tabular}
+\end{table}
+
+La fiabilité est assurée par un mécanisme d'acquittement avec \textit{retry} exponentiel (200~ms, 500~ms, 1~s, max 3 tentatives). Un E-stop matériel (relais sur le rail 12V) complète le dispositif de sécurité.
+
+\subsubsection{Architecture logicielle et Firmware du Rover}
+
+Le firmware du rover s'exécute sur le Raspberry Pi 4 sous Linux Debian. Il est écrit en Python 3 et structuré de manière asynchrone à l'aide de threads concurrents pour éviter que les opérations de communication ou d'inférence d'images ne bloquent la boucle de contrôle cinématique critique (10~Hz).
+
+\begin{enumerate}
+    \item \textbf{Thread de navigation (10~Hz)}~: Lit les données GPS et IMU, calcule l'erreur d'asservissement en direction et vitesse, et applique les équations cinématiques du modèle 6WS/6WD pour piloter le PCA9685.
+    \item \textbf{Thread de vision (0{,}5~Hz)}~: Capture une image depuis la caméra USB, exécute l'inférence YOLO/CNN via ONNX Runtime, et met à jour les registres locaux de botanique et de sécheresse.
+    \item \textbf{Thread capteurs (1~Hz)}~: Lit l'ADS1015 (tension batterie), le DHT11, le MQ135 et l'anémomètre DIY.
+    \item \textbf{Thread de communication LoRa (2~Hz)}~: Gère la file d'attente des messages sortants et entrants via l'interface SPI avec le RFM95W.
+\end{enumerate}
+
+Le listage~\ref{lst:cbor} présente l'implémentation de la sérialisation CBOR de la télémétrie.
+
+\begin{lstlisting}[language=Python, caption={Sérialisation CBOR de la télémétrie embarquée}, label={lst:cbor}]
+import cbor2
+import time
+
+class TelemetryPacket:
+    def __init__(self, lat, lon, heading, wind_speed, temp, hum, battery, species, is_dry):
+        self.lat = lat
+        self.lon = lon
+        self.heading = heading
+        self.wind_speed = wind_speed
+        self.temp = temp
+        self.hum = hum
+        self.battery = battery
+        self.species = species  # ex: "Acacia"
+        self.is_dry = 1 if is_dry else 0
+
+    def serialize(self):
+        # Utilisation de cles minimales pour economiser la bande passante LoRa
+        payload = {
+            "g": (round(self.lat, 6), round(self.lon, 6)),  # GPS
+            "h": round(self.heading, 1),                     # Cap (deg)
+            "w": round(self.wind_speed, 2),                 # Vent (m/s)
+            "t": round(self.temp, 1),                       # Temp (C)
+            "u": int(self.hum),                             # Hum (%)
+            "b": round(self.battery, 2),                     # Tension (V)
+            "s": self.species[:4].upper(),                  # Code espece
+            "d": self.is_dry                                # Etat secheresse
+        }
+        return cbor2.dumps(payload)
+\end{lstlisting}
+
+\subsubsection{Plateforme de visualisation et Station de Base}
+
+La station de base exécute un serveur Web basé sur Flask et Flask-SocketIO (1\,048 lignes de code). Ce serveur reçoit les paquets CBOR décodés transmis par la passerelle ESP32 via la liaison série USB. Il permet de~:
+\begin{itemize}[nosep]
+    \item Synchroniser la simulation et cartographier les risques en temps réel (WebSocket).
+    \item Afficher des couches SIG superposées (Vitesse de propagation ROS, intensité de ligne de feu, longueur de flamme, pente locale, direction relative du vent, humidité du combustible).
+    \item Lancer des simulations d'ensemble stochastiques pour projeter l'incertitude géospatiale du feu.
+    \item Charger dynamiquement des scénarios forestiers prédéfinis (comme la forêt de Bouskoura).
+    \item Interagir graphiquement pour éditer la grille de combustible ou placer manuellement des zones coupe-feux temporaires.
+\end{itemize}
+
+% ============================================================
+% 4.6 RÉSULTATS ET ANALYSES
+% ============================================================
+\subsection{Résultats et analyses}
+
+\subsubsection{Validation sur le terrain synthétique de Bouskoura}
+
+Le système complet a été validé sur un terrain synthétique modélisé d'après la topographie de la forêt de Bouskoura (33,535°N, 7,645°W)~:
+
+\begin{itemize}[nosep]
+    \item Grille 50$\times$50 cellules (1,5~km $\times$ 1,5~km à 30~m/cellule)
+    \item Modèle de combustible~: maquis sec nord-africain (AF\_MAQUIS)
+    \item Coupe-feux intégrés~: routes forestières (axes principaux)
+    \item Humidité 1h~: 6\,\% --- vent~: 4~m/s Ouest --- pente~: variable
+    \item Correction MLP appliquée sur les 2\,500 cellules
+    \item NDVI synthétique avec gradient NE (zones les plus sèches)
+\end{itemize}
+
+Le robot, démarrant au coin sud-ouest, a parcouru les 20 waypoints prioritaires sélectionnés par le WaypointPlanner, avec re-planification dynamique par D* Lite. Les waypoints bloqués par l'avancée du front de feu ont été automatiquement ignorés.
+
+\subsubsection{Performance du correcteur ML}
+
+L'amélioration apportée par le correcteur MLP est significative \textit{sur le dataset de littérature}~:
+
+\begin{itemize}[nosep]
+    \item $R^2$ du ROS final (littérature)~: 0,8298 (Rothermel brut) $\rightarrow$ \textbf{0,9868} (MLP corrigé)
+    \item MAE (littérature)~: 4,41~m/min $\rightarrow$ \textbf{0,735~m/min} (réduction de 83\,\%)
+    \item Performance homogène sur 5/7 sources de littérature ($R^2 > 0{,}78$)
+    \item Sur données satellites FIRMS réelles (Afrique du Sud, 2\,866 obs.)~: $R^2 = 0{,}12$ (MLP) vs $-0{,}05$ (Rothermel brut)~; le correcteur améliore le RMSE (9{,}50 $\rightarrow$ 8{,}67) mais la cible reconstruite reste bruitée.
+\end{itemize}
+
+Les figures~\ref{fig:scatter} et \ref{fig:training} illustrent respectivement la corrélation prédiction/mesure et les courbes d'entraînement.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/01_rothermel_vs_correction_vs_realite.png}
+    \caption{ROS prédit vs. mesuré --- données satellites FIRMS réelles (Afrique du Sud, 2\,866 obs.) ; Rothermel brut (MAE~5{,}02, $R^2 = -0{,}05$) contre MLP corrigé (MAE~5{,}38, $R^2 = 0{,}12$)}
+    \label{fig:scatter}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/04_courbes_entrainement_reelles.png}
+    \caption{Courbes d'entraînement du correcteur MLP sur le dataset de littérature (1\,840 obs. terrain, 120 époques) ; illustration de la convergence avant le passage aux données satellites réelles FIRMS}
+    \label{fig:training}
+\end{figure}
+
+\subsubsection{Analyse de sensibilité et de robustesse du correcteur}
+
+Pour valider le comportement physique du correcteur hybride MLP-Rothermel, nous avons mené une analyse de sensibilité systématique en faisant varier indépendamment les trois variables environnementales majeures~: la vitesse du vent ($U$), l'humidité du combustible fin ($M_f$), et la pente du terrain ($\theta$).
+
+\begin{itemize}
+    \item \textbf{Influence de la vitesse du vent ($U$)}~: Dans le modèle de Rothermel original, le facteur du vent $\phi_w = C U^B (\beta/\beta_{opt})^{-E}$ croît de façon exponentielle-puissance et peut conduire à des prédictions de ROS aberrantes pour des vents supérieurs à 15~m/s. Le modèle MLP applique une fonction de saturation douce qui limite la vitesse de propagation maximale lorsque le vent dépasse 12~m/s, simulant la dislocation du front de feu par cisaillement aérodynamique observable en conditions réelles.
+    \item \textbf{Influence de l'humidité ($M_f$)}~: Le Rothermel classique présente une transition abrupte (marche d'escalier) à l'humidité d'extinction ($M_x$, typiquement 15--30\,\%), où le ROS s'effondre instantanément à zéro. Le correcteur MLP lisse cette transition en modélisant une zone de propagation lente résiduelle (smoldering ou combustion lente) au-delà de la limite théorique d'extinction, ce qui est conforme aux observations physiques en sous-bois dense.
+    \item \textbf{Influence de la pente ($\theta$)}~: Le coefficient de pente $\phi_s$ est pondéré pour éviter la divergence aux angles élevés ($> 35^\circ$), limitant l'accélération convective de la flamme à des valeurs physiquement plausibles.
+\end{itemize}
+
+\subsubsection{Analyse de la calibration de l'automate cellulaire}
+
+La calibration de l'automate cellulaire a exploré 30 combinaisons de paramètres (exposant directionnel $\in \{1, 2, 3, 4, 6, 8\}$, fraction de retro-propagation $\in \{0{,}05, 0{,}10, 0{,}15, 0{,}20, 0{,}30\}$). La configuration optimale ($d_{exp}=8{,}0$, $b_{fire}=0{,}05$, $\Delta t=0{,}25$~min) réduit le biais de discrétisation, bien qu'un biais résiduel d'accélération multi-front persiste (ratio moyen CA/Rothermel $\approx 228$\,\%).
+
+Ce biais résiduel est un artéfact connu des automates cellulaires à voisinage de Moore~: chaque cellule cible peut être allumée par jusqu'à 3 cellules sources en amont, ce qui crée une accélération de la probabilité effective $P_{eff} = 1 - (1-p)^k$. Le correcteur ML compense partiellement ce biais.
+
+\subsubsection{Simulations de scénarios réels à Bouskoura}
+
+Le couplage de l'automate cellulaire stochastique, du correcteur MLP et du planificateur D* Lite a été testé sous trois scénarios météo-topographiques représentatifs dans la forêt de Bouskoura~:
+
+\begin{enumerate}
+    \item \textbf{Scénario A (Sirocco d'été - Propagation rapide)}~: 
+        \begin{itemize}[nosep]
+            \item \textit{Conditions}~: Vent d'Est constant à 12~m/s, Humidité 1h à 5\,\%, Température à 42~°C. Combustible de type maquis méditerranéen haut (AF\_MAQUIS). Point d'ignition placé sur la bordure Est de la forêt.
+            \item \textit{Résultats}~: Le front de feu progresse à une vitesse moyenne corrigée par le MLP de 18{,}4~m/min. Le feu traverse la grille 50$\times$50 en seulement 55 minutes, contournant partiellement les routes forestières par sauts de braises stochastiques simulés par la fraction de rétro-propagation. Ce scénario valide la capacité du modèle à projeter des fronts très asymétriques poussés par le vent.
+        \end{itemize}
+    \item \textbf{Scénario B (Propagation sous-bois humide avec relief)}~: 
+        \begin{itemize}[nosep]
+            \item \textit{Conditions}~: Vent du Nord-Ouest faible à 3~m/s, Humidité 1h à 18\,\%, Température à 24~°C. Combustible litière de cédraie de l'Atlas (AF\_CEDRE) sur un relief vallonné (pente moyenne de 15\,\% avec crête centrale).
+            \item \textit{Résultats}~: Le front progresse lentement à 1{,}2~m/min. La propagation est bloquée sur les versants descendants à l'abri du vent (effet d'ombrage topographique). Les coupe-feux routiers arrêtent totalement la propagation. Le modèle simule correctement la lente diffusion du feu sous couvert dense.
+        \end{itemize}
+    \item \textbf{Scénario C (Mission d'échantillonnage dynamique avec évitement de front)}~: 
+        \begin{itemize}[nosep]
+            \item \textit{Conditions}~: Vent de l'Ouest à 6~m/s, Humidité 1h à 8\,\%. Allumage d'un feu de surface au centre de la grille. Le rover est initialisé au point GPS sud-ouest et doit visiter 15 waypoints prioritaires répartis sur la grille.
+            \item \textit{Résultats}~: Au départ, le planificateur D* Lite calcule une trajectoire optimale passant par le centre. À $t = 15$~min, les cellules centrales prennent feu. La carte de risque Dijkstra met à jour la grille de coûts locaux. D* Lite effectue des recalculs incrémentaux (temps de calcul moyen de 3{,}8~ms sur le Pi 4) et guide le rover à travers les routes périphériques sécurisées. Trois waypoints trop proches du front de feu (marge de sécurité $< 100$~m) sont dynamiquement désactivés et ignorés par le planificateur, garantissant la survie physique du rover.
+        \end{itemize}
+\end{enumerate}
+
+\subsubsection{Réalisation matérielle}
+
+La partie matérielle a abouti à la conception d'un prototype comprenant~:
+\begin{itemize}[nosep]
+    \item Châssis WildWilly assemblé avec 13 pièces imprimées en 3D (PLA)
+    \item Schéma électrique complet réalisé sous Fritzing (figure~\ref{fig:circuit})
+    \item Architecture logicielle pour le firmware (les pilotes bas niveau et codes microcontrôleurs décrits dans la nomenclature matérielle (BOM) ne sont pas inclus dans ce dépôt public, centré sur la simulation et la correction par IA)
+    \item Mode simulation/mock permettant le développement et les tests algorithmiques sans matériel physique
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.90\textwidth]{figures/circuit_fritzing.png}
+    \caption{Schéma de câblage du rover BurnTrack (Fritzing)}
+    \label{fig:circuit}
+\end{figure}
+
+\paragraph{Impression 3D.} Le châssis WildWilly nécessite 13 pièces structurelles imprimées en PLA sur les imprimantes du FabLab de l'école. Les pièces comprennent les supports de suspension rocker-bogie, les adaptateurs de roue, les supports de capteurs (anémomètre, caméra, GPS), et le boîtier de protection électronique. Le temps total d'impression est estimé à environ 38 heures, avec une densité de remplissage de 30\,\% pour un compromis poids/rigidité.
+
+\paragraph{Assemblage et intégration.} L'assemblage du prototype a été réalisé en plusieurs étapes~:
+
+\begin{enumerate}[nosep]
+    \item Montage du châssis et du mécanisme rocker-bogie (figure~\ref{fig:chassis})
+    \item Installation des 6 moteurs DC et des 6 servomoteurs de direction
+    \item Câblage des 3 ponts en H L298N et du PCA9685
+    \item Intégration des capteurs (IMU, GPS, DHT11, MQ135) sur breadboard (figure~\ref{fig:breadboard})
+    \item Montage de l'anémomètre DIY à capteurs Hall SS41F
+    \item Installation du module LoRa RFM95W et de la caméra USB
+    \item Câblage final et tests individuels de chaque sous-système
+\end{enumerate}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{figures/assemblage_chassis.jpg}
+    \caption{Assemblage du châssis WildWilly avec les pièces 3D imprimées}
+    \label{fig:chassis}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{figures/capteurs_breadboard.jpg}
+    \caption{Prototype de test~: capteurs et drivers sur breadboard}
+    \label{fig:breadboard}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{figures/electronique_interne.jpg}
+    \caption{Électronique interne du rover~: drivers moteur, PCA9685 et câblage}
+    \label{fig:electronique}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{figures/rover_final.jpg}
+    \caption{Prototype final du rover BurnTrack entièrement assemblé et équipé de ses capteurs}
+    \label{fig:rover_final}
+\end{figure}
+
+\paragraph{Sécurité.} Le rover intègre plusieurs mécanismes de sécurité~:
+\begin{itemize}[nosep]
+    \item \textbf{E-stop matériel}~: un relais sur le rail 12V, commandé par un bouton physique, coupe l'alimentation des moteurs indépendamment du logiciel.
+    \item \textbf{Bridage logiciel}~: le PWM est limité à 60\,\% en mode démonstration intérieure.
+    \item \textbf{Géofence}~: si la position GPS quitte le polygone configuré, le rover s'arrête immédiatement.
+    \item \textbf{Retour automatique}~: à 10,5~V (3,5~V/cellule), le rover abandonne sa mission et retourne au point de départ.
+    \item \textbf{Commande STOP à distance}~: la station de base peut envoyer un message LoRa d'arrêt d'urgence.
+\end{itemize}
+
+% ============================================================
+% CONCLUSION
+% ============================================================
+\section{Conclusion générale}
+
+\subsection*{Contributions}
+
+Le projet BurnTrack a permis de réaliser les contributions suivantes~:
+
+\begin{enumerate}[nosep]
+    \item \textbf{Première bibliothèque de modèles de combustible africains} --- 28 modèles calibrés pour les écosystèmes marocains et africains, couvrant les steppes, forêts, savanes, maquis et zones agricoles du continent.
+    \item \textbf{Correcteur ML pour Rothermel} --- un réseau de neurones (MLP 8$\rightarrow$64$\rightarrow$32$\rightarrow$1) améliorant le $R^2$ de 0,83 à 0,99 sur un jeu de données de 1\,840 observations réelles.
+    \item \textbf{Plateforme de simulation intégrée} --- couplage Rothermel + automate cellulaire stochastique + simulation d'ensemble + visualisation WebSocket temps réel.
+    \item \textbf{Navigation autonome en environnement dynamique} --- algorithme D* Lite avec carte de risque Dijkstra et re-planification incrémentale.
+    \item \textbf{Prototype de rover 6WD/6WS} --- plateforme complète avec capteurs environnementaux, vision ONNX embarquée et communication LoRa.
+\end{enumerate}
+
+\subsection*{Limites et difficultés rencontrées}\label{sec:limites}
+
+\begin{itemize}[nosep]
+    \item \textbf{Données satellites réelles.} Le correcteur entraîné sur les détections FIRMS d'Afrique du Sud n'atteint qu'un $R^2 = 0{,}12$. Cette faiblesse s'explique par la reconstruction du ROS à partir de points de chaleur satellites ponctuels, par l'absence de front continu, et par le bruit des réanalyses météo (ERA5-Land, résolution 0,1$^\circ$). Une collecte terrain frontale (ligne de feu + chronométrage) serait nécessaire pour obtenir une cible fiable.
+    \item Le biais d'accélération multi-front de l'automate cellulaire (ratio CA/Rothermel $> 200$\,\%) nécessite une calibration fine des paramètres angulaires et un pas de temps réduit (condition CFL).
+    \item Les servos MG90S se sont révélés insuffisants en couple par rapport aux spécifications du châssis WildWilly, nécessitant un bridage logiciel de la vitesse de braquage.
+    \item Les données de littérature africaines restent limitées (7 études, 1\,840 points) et concentrées sur quelques régions, ce qui limite la généralisation du correcteur.
+    \item La fréquence unique du PCA9685 ($\sim$50--60~Hz) impose un compromis entre contrôle servo et PWM moteur.
+\end{itemize}
+
+\subsection*{Perspectives}
+
+\begin{itemize}[nosep]
+    \item \textbf{Déploiement terrain} dans la forêt de Bouskoura, en exploitant les coordonnées GPS déjà intégrées au code (33,535°N, 7,645°W).
+    \item Intégration de données satellite (Google Earth Engine~: NDVI, NDWI, LST) pour initialiser les conditions de la grille.
+    \item Ingestion en temps réel des hotspots FIRMS (NASA) pour validation croisée.
+    \item Extension du dataset par collecte de données terrain avec le rover, permettant un apprentissage en boucle fermée.
+    \item Couplage avec un drone pour la cartographie aérienne et la détection précoce de foyers.
+\end{itemize}
+
+% ============================================================
+% RÉFÉRENCES
+% ============================================================
+\section{Références}
+
+\begin{enumerate}[nosep,label={[\arabic*]}]
+    \item Rothermel, R.C. (1972). \textit{A mathematical model for predicting fire spread in wildland fuels}. USDA Forest Service Research Paper INT-115.
+    \item Albini, F.A. (1976). \textit{Estimating wildfire behavior and effects}. USDA Forest Service General Technical Report INT-30.
+    \item Andrews, P.L. (2018). The Rothermel surface fire spread model and associated developments: A comprehensive explanation. \textit{USDA Forest Service General Technical Report RMRS-GTR-371}.
+    \item Cruz, M.G. et al. (2015). Anatomy of a catastrophic wildfire: The Black Saturday Kilmore East fire in Victoria, Australia. \textit{Forest Ecology and Management}, 342, 91--100.
+    \item Govender, N. et al. (2006). Effect of fire season, fire frequency, rainfall and management on fire intensity in savanna vegetation. \textit{Journal of Applied Ecology}, 43(4), 748--758.
+    \item Catchpole, W.R. et al. (1982). Estimating fuel response time and predicting fuel moisture content from field data. \textit{International Journal of Wildland Fire}, 1(2), 101--112.
+    \item Koenig, S. \& Likhachev, M. (2002). D* Lite. \textit{Proceedings of the AAAI Conference on Artificial Intelligence}, 476--483.
+    \item Savadogo, P. et al. (2014). Fire behaviour and its ecological effects in Sudanian savanna-woodland, West Africa. \textit{African Journal of Ecology}, 52(1), 19--27.
+    \item Frost, P.G.H. \& Robertson, F. (1987). Fire: the ecological effects of fire in savannas. \textit{Determinants of Tropical Savannas}, IRL Press, 93--140.
+    \item Scott, J.H. \& Burgan, R.E. (2005). \textit{Standard fire behavior fuel models: a comprehensive set for use with Rothermel's surface fire spread model}. USDA Forest Service RMRS-GTR-153.
+    \item Haut Commissariat aux Eaux et Forêts et à la Lutte Contre la Désertification du Maroc. Rapports annuels sur les incendies de forêt (2020--2025).
+\end{enumerate}
+
+% ============================================================
+% ANNEXES
+% ============================================================
+\section{Annexes}
+
+\subsection*{Annexe A~: Tableau complet des modèles de combustible}
+
+\begin{small}
+\begin{longtable}{|l|l|c|c|c|c|}
+\hline
+\rowcolor{NavyBlue} \textcolor{white}{\textbf{Code}} & \textcolor{white}{\textbf{Nom}} & \textcolor{white}{\textbf{$w_{1h}$}} & \textcolor{white}{\textbf{$\delta$}} & \textcolor{white}{\textbf{$\sigma_{1h}$}} & \textcolor{white}{\textbf{$m_x$}} \\
+\rowcolor{NavyBlue}  & & \textcolor{white}{(kg/m²)} & \textcolor{white}{(m)} & \textcolor{white}{($\text{m}^{-1}$)} & \textcolor{white}{(\%)} \\
+\hline
+\endhead
+\multicolumn{6}{l}{\textit{Modèles Afrique du Nord}} \\
+\hline
+AF\_STEPPE & Steppe marocaine & 0,25 & 0,25 & 12\,000 & 20 \\
+AF\_STEPPE\_DENSE & Steppe dense Haut Atlas & 0,40 & 0,35 & 11\,000 & 20 \\
+AF\_ARGANE & Arganeraie & 0,35 & 0,40 & 8\,000 & 25 \\
+AF\_CHENE\_LIEGE & Chênaie-liège & 0,45 & 0,30 & 8\,500 & 30 \\
+AF\_CEDRE & Cédraie de l'Atlas & 0,30 & 0,25 & 10\,000 & 30 \\
+AF\_MAQUIS & Maquis méditerranéen & 0,60 & 0,50 & 7\,000 & 20 \\
+AF\_CEREAL & Plaine céréalière & 0,30 & 0,70 & 11\,000 & 18 \\
+AF\_PALMIER & Palmeraie & 0,20 & 0,30 & 6\,000 & 35 \\
+AF\_TAMARIX & Ripisylve à tamarix & 0,30 & 0,40 & 7\,500 & 30 \\
+AF\_JUJUBIER & Jujubier & 0,25 & 0,30 & 9\,000 & 22 \\
+\hline
+\multicolumn{6}{l}{\textit{Modèles Afrique subsaharienne (extrait)}} \\
+\hline
+AF\_SAHEL & Savane sahélienne & 0,30 & 0,50 & 9\,500 & 20 \\
+AF\_SOUDAN & Savane soudanienne & 0,45 & 0,60 & 10\,000 & 25 \\
+AF\_MIOMBO & Forêt claire miombo & 0,40 & 0,50 & 9\,000 & 25 \\
+AF\_MOPANE & Forêt de mopane & 0,35 & 0,40 & 8\,000 & 25 \\
+AF\_FYNBOS & Fynbos (mature) & 0,50 & 0,70 & 12\,000 & 25 \\
+AF\_BUSHVELD & Bushveld & 0,45 & 0,50 & 9\,500 & 22 \\
+AF\_ACACIA & Savane à acacias & 0,35 & 0,50 & 10\,000 & 22 \\
+AF\_FERTILE & Grassland fertile & 0,50 & 0,80 & 11\,000 & 25 \\
+\hline
+\multicolumn{6}{l}{\textit{Modèles BEHAVE standard (extrait)}} \\
+\hline
+GR1 & Short, sparse grass & 0,22 & 0,12 & 7\,480 & 15 \\
+GR4 & Moderate load grass & 4,15 & 0,61 & 3\,444 & 15 \\
+SH5 & High load shrub & 1,63 & 1,83 & 2\,480 & 15 \\
+TL3 & Moderate load timber & 1,22 & 0,30 & 6\,562 & 20 \\
+\hline
+\caption{Extrait des modèles de combustible implémentés dans BurnTrack (les valeurs de $\sigma_{1h}$ des modèles BEHAVE sont conservées en unités impériales $\text{ft}^{-1}$ pour compatibilité avec les paramètres d'origine d'Anderson (1982) et Scott \& Burgan (2005) ; les modèles africains utilisent des valeurs calibrées localement en $\text{m}^{-1}$)}
+\end{longtable}
+\end{small}
+
+\subsection*{Annexe B~: Structure du dépôt de code}
+
+\begin{small}
+\begin{verbatim}
+burntrack-simulation/
+|-- burntrack/
+|   |-- correcteur final/  # MLP minimal + correcteur final entraîné
+|   |   |-- checkpoints/   # Poids du modèle
+|   |   |-- results/       # Figures d'évaluation
+|   |   |-- source/        # Architectures et pertes
+|   |-- data/              # Utilitaires FIRMS, météo, dataset réel
+|   `-- engine/            # Moteur Rothermel v3 + modèles de combustible
+|-- cellular_automaton/    # Grille, règles et simulation
+|-- circuit/               # Schémas et câblages Fritzing
+|-- configs/               # Paramètres de simulation (YAML)
+|-- data/                  # Datasets traités (CSV partagés)
+|-- experiments/           # Validation CA + calibration
+|-- images/                # Photos du prototype
+|-- rapport/               # Fichiers sources du rapport (LaTeX)
+|-- risk_map/              # Générateur de cartes de risque
+|-- robot_nav/             # D* Lite et planification de chemins
+|-- robot_vision/          # Vision (YOLO + CNN, modèles ONNX)
+|-- scripts/               # Téléchargement et construction des données
+|-- tests/                 # Tests unitaires du code
+`-- visualization/         # Serveur WebSocket et interface web 3D
+\end{verbatim}
+\end{small}
+
+\subsection*{Annexe C~: Couverture géographique des données}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/03_couverture_geographique_firms.png}
+    \caption{Couverture géographique des données d'observation utilisées}
+\end{figure}
+
+\subsection*{Annexe D~: Métriques par intensité de feu}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/02_metriques_par_intensite.png}
+    \caption{Performance du correcteur par classe d'intensité de feu}
+\end{figure}
+
+\end{document}
+

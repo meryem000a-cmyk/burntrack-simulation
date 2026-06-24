@@ -1,0 +1,574 @@
+\documentclass[a4paper,12pt,openany,titlepage]{scrartcl}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper,left=2cm,right=2cm,top=2.5cm,bottom=2.5cm]{geometry}
+\usepackage[french]{babel}
+\usepackage{libertine}
+\usepackage[pdftex]{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{float}
+\usepackage{amsmath,amssymb}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage[table]{xcolor}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{tikz}
+\usepackage{pgfgantt}
+\usepackage{scrlayer-scrpage}
+
+% ============================================================
+% DESIGN & COLOR PREFERENCES (SEMESTER REPORT THEME)
+% ============================================================
+\definecolor{NavyBlue}{RGB}{12, 35, 64}
+\definecolor{AccentColor}{RGB}{204, 51, 0}
+\definecolor{LightBlue}{RGB}{240, 244, 250}
+
+\addtokomafont{section}{\color{NavyBlue}\sffamily}
+\addtokomafont{subsection}{\color{NavyBlue}\sffamily}
+\addtokomafont{subsubsection}{\color{NavyBlue}\sffamily}
+\setkomafont{captionlabel}{\color{NavyBlue}\sffamily\bfseries}
+\setkomafont{caption}{\small}
+
+% ============================================================
+% HEADERS & FOOTERS (scrlayer-scrpage)
+% ============================================================
+\pagestyle{scrheadings}
+\clearpairofpagestyles
+\ihead{\color{NavyBlue}\sffamily\small PROJET BURNTRACK \textbullet{} GROUPE 7}
+\ohead{\color{NavyBlue}\sffamily\small\pagemark}
+\cfoot[\pagemark]{} % page numbers centered in footer for plain style (front matter)
+\addtokomafont{pagehead}{\normalfont}
+\KOMAoptions{headsepline=0.5pt}
+\addtokomafont{headsepline}{\color{NavyBlue}}
+
+\setlength{\parindent}{0cm}
+\setlength{\parskip}{1ex plus 0.5ex minus 0.2ex}
+\newcommand{\hsp}{\hspace{20pt}}
+\newcommand{\HRule}{\color{AccentColor}\rule{\linewidth}{0.8mm}\color{black}}
+
+\hypersetup{colorlinks=true,linkcolor=NavyBlue,citecolor=AccentColor,urlcolor=NavyBlue}
+
+\lstset{basicstyle=\ttfamily\small,breaklines=true,frame=single,backgroundcolor=\color{gray!8},keywordstyle=\color{NavyBlue},commentstyle=\color{green!50!black},numbers=left,numberstyle=\tiny\color{gray},xleftmargin=2em}
+
+\linespread{1.4}\selectfont
+\begin{document}
+
+% ============================================================
+% PAGE DE TITRE
+% ============================================================
+\begin{titlepage}
+  \begin{sffamily}
+  \begin{minipage}{0.48\textwidth}
+    \begin{flushleft}
+      \includegraphics[height=1.8cm]{CENTRALE_CASA_LOGO_OK.png}
+    \end{flushleft}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \begin{flushright}
+      \includegraphics[height=3.2cm]{burntrack_logo_white.png}
+    \end{flushright}
+  \end{minipage}
+  \\[1.5cm]
+  
+  \begin{center}
+    \textsc{\LARGE École Centrale Casablanca}\\[0.8cm]
+    \textsc{\LARGE PROJET LEARNING BY DOING}\\[0.4cm]
+    \textsc{\large Année universitaire 2025--2026}\\[1.5cm]
+
+    \HRule \\[0.4cm]
+    { \huge \bfseries \color{NavyBlue} BurnTrack : Rover Autonome pour la Prédiction de Propagation d'Incendies Forestiers \\[0.4cm] }
+    \HRule \\[2.5cm]
+
+    \begin{minipage}[t]{0.48\textwidth}
+      \begin{flushleft} \large
+        \textbf{\underline{Équipe de Conception :}}\\
+        \vfill
+        MOUNIR Anwar\\
+        AZGRAR Meryem\\
+        LATIFI Chady\\
+        DIONE Amina\\
+        MALEU Ivan Emmanuel Rabe\\
+      \end{flushleft}
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.48\textwidth}
+      \begin{flushright} \large
+         \textbf{\underline{Sous la supervision de :}}\\
+         \vfill
+         Pr. BELHBOUB Anouar\\
+      \end{flushright}
+    \end{minipage}
+
+    \vfill
+    {\large Juin 2026}
+  \end{center}
+  \end{sffamily}
+\end{titlepage}
+
+% ============================================================
+% DÉDICACES
+% ============================================================
+\newpage
+\pagestyle{empty}
+\thispagestyle{empty}
+\vspace*{5cm}
+\begin{center}
+\textit{\large À nos familles, pour leur soutien inconditionnel.}
+\end{center}
+\newpage
+
+\tableofcontents
+\listoffigures
+\listoftables
+\newpage
+
+% ============================================================
+% LISTE DES ACRONYMES
+% ============================================================
+\section*{Liste des acronymes et abréviations}
+\addcontentsline{toc}{section}{Liste des acronymes}
+
+\begin{tabularx}{\textwidth}{lX}
+\textbf{CA} & Cellular Automaton (Automate Cellulaire) \\
+\textbf{CBOR} & Concise Binary Object Representation \\
+\textbf{CFL} & Courant--Friedrichs--Lewy (condition de stabilité) \\
+\textbf{CNN} & Convolutional Neural Network \\
+\textbf{DFMC} & Dead Fuel Moisture Content \\
+\textbf{GPS} & Global Positioning System \\
+\textbf{HPUA} & Heat Per Unit Area \\
+\textbf{IMU} & Inertial Measurement Unit \\
+\textbf{LHMC} & Live Herbaceous Moisture Content \\
+\textbf{LoRa} & Long Range (protocole radio basse consommation) \\
+\textbf{MAE} & Mean Absolute Error \\
+\textbf{MLP} & Multi-Layer Perceptron \\
+\textbf{NDVI} & Normalized Difference Vegetation Index \\
+\textbf{ONNX} & Open Neural Network Exchange \\
+\textbf{PLBD} & Projet Learning By Doing \\
+\textbf{PWM} & Pulse Width Modulation \\
+\textbf{ROS} & Rate of Spread (vitesse de propagation) \\
+\textbf{RPi4} & Raspberry Pi 4 \\
+\textbf{SAV} & Surface Area to Volume ratio \\
+\textbf{VPD} & Vapour Pressure Deficit \\
+\end{tabularx}
+
+\newpage
+\pagenumbering{arabic}
+\setcounter{page}{1}
+\pagestyle{plain}
+
+% ============================================================
+% REMERCIEMENTS
+% ============================================================
+\section{Remerciements}
+
+Nous tenons tout d'abord à exprimer notre profonde gratitude envers notre encadrant, pour son accompagnement tout au long de ce projet. Ses orientations et ses remarques nous ont permis de structurer notre démarche et d'aboutir aux résultats présentés dans ce rapport.
+
+Nous remercions également l'administration de l'École Centrale Casablanca, et en particulier l'équipe du FabLab, pour la mise à disposition des équipements d'impression 3D et de prototypage qui ont été essentiels à la réalisation de la partie matérielle du projet.
+
+Nous tenons également à exprimer une gratitude toute particulière à nos parents, impliqués bien malgré eux à diverses étapes de cette aventure (que ce soit pour le transport logistique des pièces, le soutien lors des séances d'assemblage nocturnes ou le support moral indispensable).
+
+Enfin, nous remercions l'ensemble des membres du groupe pour l'esprit collaboratif qui a animé ce projet tout au long de l'année.
+
+\vspace{0.8cm}
+
+% ============================================================
+% RÉSUMÉ & ABSTRACT
+% ============================================================
+\section{Résumé}
+
+Les incendies de forêt constituent une menace croissante pour les écosystèmes marocains et africains, aggravée par le changement climatique. Les modèles de prédiction existants, calibrés sur la végétation nord-américaine, ne sont pas directement applicables aux biomes africains. Ce projet propose \textbf{BurnTrack}, un système intégré combinant un rover autonome de collecte de données environnementales et une plateforme de simulation de propagation d'incendies.
+
+Le système repose sur quatre piliers : (1) un moteur Rothermel v3 corrigé, implémentant 50 modèles de combustible dont 28 spécifiques à l'Afrique~; (2) un automate cellulaire stochastique couplé à un correcteur par apprentissage automatique (MLP, $R^2 = 0{,}987$, MAE $= 0{,}735$ m/min sur le dataset de littérature de 1\,840 observations terrain)~; (3) un rover 6WD/6WS à base de Raspberry Pi 4, équipé de capteurs environnementaux, d'un anémomètre DIY et d'une caméra pour la classification botanique par vision artificielle (YOLO + CNN)~; (4) une communication LoRa entre le rover et la station de base, couplée à une visualisation en temps réel par WebSocket.
+
+La navigation autonome du rover utilise l'algorithme D* Lite pour planifier des trajectoires en évitant le front de feu, avec re-planification dynamique. Les résultats montrent une amélioration significative de la prédiction du taux de propagation par rapport au modèle Rothermel brut.
+
+\vspace{0.8cm}
+
+\section{Abstract}
+
+Forest fires constitute an escalating threat to Moroccan and African ecosystems, worsened by climate change. Existing prediction models, calibrated on North American vegetation, are not directly applicable to African biomes. This project introduces \textbf{BurnTrack}, an integrated system combining an autonomous environmental data collection rover and a fire propagation simulation platform.
+
+The system relies on four pillars: (1) a corrected Rothermel v3 engine, implementing 50 fuel models including 28 specific to Africa; (2) a stochastic cellular automaton coupled with a machine learning corrector (MLP, $R^2 = 0.987$, MAE $= 0.735$ m/min on the literature dataset of 1,840 field observations); (3) a Raspberry Pi 4-based 6WD/6WS rover, equipped with environmental sensors, a DIY anemometer, and a camera for botanical classification via computer vision (YOLO + CNN); (4) a LoRa communication link between the rover and the base station, coupled with real-time WebSocket visualization.
+
+The autonomous navigation of the rover utilizes the D* Lite algorithm to plan paths avoiding the fire front, with dynamic replanning. The results demonstrate a significant improvement in rate of spread prediction compared to the raw Rothermel model, paving the way for proactive fire management.
+
+\newpage
+\pagestyle{scrheadings}
+
+% ============================================================
+% INTRODUCTION
+% ============================================================
+\section{Introduction}
+
+Les incendies de forêt représentent un enjeu environnemental majeur à l'échelle mondiale. Au Maroc, la forêt couvre environ 9 millions d'hectares --- soit 12\,\% du territoire national --- et subit chaque année des pertes considérables. Selon le Haut Commissariat aux Eaux et Forêts et à la Lutte Contre la Désertification, plus de 10\,000 hectares sont ravagés annuellement, principalement dans les régions du Rif, du Moyen Atlas et de la Maâmora. Le changement climatique, en allongeant les saisons sèches et en intensifiant les vagues de chaleur, aggrave cette situation de manière alarmante.
+
+Face à ce constat, la prédiction du comportement des feux de forêt s'avère essentielle pour une gestion proactive des risques. Le modèle semi-empirique de Rothermel (1972), qui constitue la référence mondiale en matière de modélisation de la propagation de surface, présente néanmoins deux limites fondamentales dans le contexte africain~: premièrement, ses modèles de combustible standard (BEHAVE) ont été calibrés sur la végétation nord-américaine~; deuxièmement, les données d'observation terrain nécessaires à sa calibration sont quasi inexistantes pour les écosystèmes africains.
+
+Notre projet, \textbf{BurnTrack}, vise à combler ce double déficit en proposant une approche intégrée articulée autour de deux axes complémentaires~:
+
+\begin{itemize}[nosep]
+    \item \textbf{Un axe simulation} : adaptation du modèle de Rothermel avec 28 modèles de combustible spécifiques aux écosystèmes marocains et africains, couplage avec un automate cellulaire stochastique, et correction par apprentissage automatique à partir de données de la littérature scientifique.
+    \item \textbf{Un axe robotique} : conception et réalisation d'un rover autonome 6WD/6WS capable de collecter des données environnementales \textit{in situ} (température, humidité, vent, pente, qualité de l'air) et d'identifier les espèces végétales par vision artificielle, alimentant ainsi le modèle de simulation en boucle fermée.
+\end{itemize}
+
+Ce rapport présente les travaux réalisés au cours de l'année universitaire 2025--2026. Après une présentation du contexte et de la problématique (section~4), nous détaillons l'état de l'art des modèles de feu et des rovers de surveillance (section~4.3). Nous décrivons ensuite l'architecture technique de la solution (section~4.4), les détails de réalisation et les tests effectués (section~4.5), puis les résultats obtenus et leur analyse (section~4.6). Nous concluons par les perspectives d'amélioration et de déploiement terrain.
+
+\vspace{0.8cm}
+
+% ============================================================
+% DÉVELOPPEMENT DU PROJET
+% ============================================================
+\section{Développement du projet}
+
+% ------------------------------------------------------------
+\subsection{Planification et Répartition des Rôles}
+
+Le projet s'est déroulé sur les deux semestres de l'année universitaire 2025--2026, selon le découpage temporel présenté dans le tableau~\ref{tab:phases} et le diagramme de Gantt (figure~\ref{fig:gantt}).
+
+\begin{table}[H]
+\centering
+\caption{Phases clés du projet BurnTrack}
+\label{tab:phases}
+\begin{tabularx}{\textwidth}{|l|l|X|}
+\hline
+\rowcolor{NavyBlue} \textcolor{white}{\textbf{Phase}} & \textcolor{white}{\textbf{Période}} & \textcolor{white}{\textbf{Activités principales}} \\
+\hline
+Cadrage & Sep--Nov 2025 & Cahier des charges, étude bibliographique, choix technologiques \\
+\hline
+Conception & Déc 2025--Fév 2026 & Conception mécanique (CAO), modélisation 3D, commande matériel, architecture logicielle \\
+\hline
+Prototypage & Fév--Mar 2026 & Impression 3D (13 pièces), assemblage châssis, câblage initial, tests moteurs \\
+\hline
+Développement & Mar--Mai 2026 & Moteur Rothermel v3, modèles de combustible, pipeline vision, premiers correcteurs ML \\
+\hline
+Intégration & Mai--Juin 2026 & Automate cellulaire, navigation D* Lite, protocole LoRa, visualisation WebSocket, tests d'intégration \\
+\hline
+Finalisation & Juin 2026 & Calibration, rédaction du rapport, préparation de la soutenance \\
+\hline
+\end{tabularx}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{ganttchart}[
+    hgrid,
+    vgrid,
+    x unit=0.58cm,
+    y unit title=0.6cm,
+    y unit chart=0.7cm,
+    title height=1,
+    bar/.style={fill=blue!40},
+    bar height=0.5,
+    group right shift=0,
+    group top shift=0.1,
+    group height=.2,
+    group peaks width=0.2,
+    milestone/.style={fill=red, draw=red, shape=ganttmilestone}
+]{1}{20}
+\gantttitle{2025--2026}{20} \\
+\gantttitlelist{9,10,11,12,1,2,3,4,5,6}{2} \\
+\ganttgroup{Cadrage \& Biblio}{1}{4} \\
+\ganttbar{Cahier des charges}{1}{2} \\
+\ganttbar{Étude bibliographique}{2}{4} \\
+\ganttgroup{Conception}{5}{8} \\
+\ganttbar{Conception CAO Châssis}{5}{7} \\
+\ganttbar{Architecture logicielle}{6}{8} \\
+\ganttgroup{Prototypage}{9}{12} \\
+\ganttbar{Impression 3D}{9}{11} \\
+\ganttbar{Câblage \& Drivers}{10}{12} \\
+\ganttgroup{Développement}{13}{16} \\
+\ganttbar{Moteur Rothermel v3}{13}{15} \\
+\ganttbar{Pipeline Vision ONNX}{14}{16} \\
+\ganttgroup{Intégration \& Tests}{17}{20} \\
+\ganttbar{Automate Cellulaire}{17}{18} \\
+\ganttbar{Couplage \& D* Lite}{18}{19} \\
+\ganttbar{Calibration \& Rapport}{19}{20}
+\end{ganttchart}
+\caption{Diagramme de Gantt du projet BurnTrack}
+\label{fig:gantt}
+\end{figure}
+
+L'organisation interne de l'équipe a été structurée de manière à exploiter les compétences spécifiques de chaque membre, tout en assurant des phases d'intégration collaborative~:
+
+\begin{itemize}
+    \item \textbf{MOUNIR Anwar} (Simulation \& Machine Learning) :
+        \begin{itemize}[nosep]
+            \item Réécriture et correction du moteur Rothermel v3 en Python.
+            \item Développement du correcteur MLP par réseau de neurones et calibration des hyperparamètres.
+            \item Implémentation du planificateur de chemin dynamique D* Lite et de l'algorithme Dijkstra multi-sources.
+            \item Développement de la plateforme de visualisation WebSocket/Flask.
+        \end{itemize}
+    \item \textbf{AZGRAR Meryem} (Conception Mécanique \& Impression 3D) :
+        \begin{itemize}[nosep]
+            \item Modélisation CAO du châssis WildWilly sous SolidWorks.
+            \item Optimisation des pièces structurelles pour impression 3D (PLA) et gestion de l'impression au FabLab.
+            \item Conception mécanique du système de suspension rocker-bogie et montage mécanique du châssis.
+        \end{itemize}
+    \item \textbf{LATIFI Chady} (Électronique \& Firmware Embarqué) :
+        \begin{itemize}[nosep]
+            \item Choix des composants matériels et routage du schéma de câblage sous Fritzing.
+            \item Configuration de l'environnement matériel (Raspberry Pi 4, PCA9685, ADS1015, capteurs).
+            \item Programmation des drivers bas niveau pour le contrôle des moteurs DC et servos de direction.
+            \item Implémentation de la logique de contrôle cinématique 6WS/6WD.
+        \end{itemize}
+    \item \textbf{DIONE Amina} (Vision Artificielle \& Télédétection) :
+        \begin{itemize}[nosep]
+            \item Entraînement et optimisation du modèle de classification botanique (YOLO) et de sécheresse (CNN).
+            \item Export et intégration du pipeline de vision sous format ONNX Runtime pour exécution sur le RPi4.
+            \item Collecte des données de télédétection et liaison avec les modèles de combustible.
+        \end{itemize}
+    \item \textbf{MALEU Ivan Emmanuel Rabe} (Système de Communication \& Protocole IoT) :
+        \begin{itemize}[nosep]
+            \item Conception du protocole LoRa et définition des formats d'encodage CBOR compacts.
+            \item Programmation de la passerelle de communication ESP32 LoRa et liaison série USB.
+            \item Gestion de la fiabilité de la transmission radio (mécanismes d'acquittement et retries).
+        \end{itemize}
+\end{itemize}
+
+% ------------------------------------------------------------
+\subsection{Contexte et problématique}
+
+\subsubsection{Le risque incendie au Maroc}
+
+Le Maroc est particulièrement vulnérable aux feux de forêt en raison de sa position géographique, de son climat méditerranéen à semi-aride et de la diversité de ses écosystèmes forestiers. Les principales zones à risque comprennent~:
+
+\begin{itemize}[nosep]
+    \item La forêt de la Maâmora (130\,000 ha au total, dont environ 73\,000 ha de chêne-liège)
+    \item Les cédraies du Moyen Atlas (\textit{Cedrus atlantica})
+    \item Le maquis méditerranéen du Rif
+    \item L'arganeraie du Souss (\textit{Argania spinosa}, endémique)
+    \item La forêt de Bouskoura (périurbaine, 2\,800 ha) --- notre cas d'étude
+\end{itemize}
+
+La forêt de Bouskoura, située à 12 km au sud de Casablanca (33,535°N, 7,645°W), présente un intérêt particulier en raison de sa proximité urbaine et des risques que représenterait un incendie non maîtrisé pour les zones résidentielles environnantes.
+
+\subsubsection{Limites des modèles existants}
+
+Le modèle de Rothermel, bien que référence mondiale, souffre de deux limitations majeures dans le contexte africain~:
+
+\begin{enumerate}[nosep]
+    \item \textbf{Absence de modèles de combustible africains}~: les modèles standard BEHAVE de la littérature (comprenant les 13 modèles historiques d'Anderson (1982) et les 40 modèles de Scott \& Burgan (2005)) décrivent la végétation nord-américaine. Les propriétés physico-chimiques de la végétation africaine (chaleur de combustion, rapport surface/volume, charge de combustible) diffèrent significativement.
+    \item \textbf{Manque de données d'observation}~: les études publiées sur le comportement du feu en Afrique sont rares (environ 1\,840 observations exploitables, issues de 7 études sur 30 ans), contre des dizaines de milliers pour l'Amérique du Nord.
+\end{enumerate}
+
+\subsubsection{Objectifs du projet}
+
+Face à ces constats, BurnTrack poursuit les objectifs suivants~:
+
+\begin{enumerate}[nosep]
+    \item Développer des modèles de combustible calibrés pour les écosystèmes marocains et africains
+    \item Implémenter un moteur Rothermel corrigé, couplé à un automate cellulaire et un correcteur par apprentissage automatique
+    \item Concevoir un rover autonome capable de collecter les données environnementales nécessaires à la calibration du modèle
+    \item Établir un protocole de communication IoT pour la transmission en temps réel des données terrain
+    \item Développer une plateforme de visualisation interactive des cartes de risque
+\end{enumerate}
+
+% ------------------------------------------------------------
+\subsection{État de l'art}
+
+\subsubsection{Modèles de propagation des feux de surface}
+
+\paragraph{Le modèle de Rothermel (1972).} Le modèle semi-empirique de Rothermel décrit la vitesse de propagation du feu de surface $R$ (m/min) par l'équation~:
+
+\begin{equation}
+R = \frac{I_R \cdot \xi \cdot (1 + \phi_w + \phi_s)}{\rho_b \cdot \varepsilon \cdot Q_{ig}}
+\label{eq:rothermel}
+\end{equation}
+
+où $I_R$ est l'intensité de réaction (kW/m²), $\xi$ le coefficient de propagation, $\phi_w$ et $\phi_s$ les coefficients de vent et de pente, $\rho_b$ la densité apparente du lit de combustible, $\varepsilon$ le nombre effectif de chauffage, et $Q_{ig}$ la chaleur de pré-inflammation.
+
+Ce modèle, malgré son ancienneté, reste la base de la plupart des systèmes opérationnels de prédiction des incendies, notamment BEHAVE et FARSITE.
+
+\paragraph{Approches par automate cellulaire.} Les automates cellulaires (CA) discrétisent l'espace en cellules sur une grille régulière, chaque cellule pouvant être dans l'un des états~: non brûlé, en feu, brûlé, ou coupe-feu. La propagation est régie par des règles probabilistes appliquées au voisinage de Moore (8 cellules adjacentes). L'avantage principal est la capacité de modéliser l'hétérogénéité spatiale du combustible et du terrain, au prix d'un biais de discrétisation (effet CFL, accélération multi-front).
+
+\paragraph{Tableau comparatif.}
+
+\begin{table}[H]
+\centering
+\caption{Comparaison des approches de modélisation des feux}
+\begin{tabularx}{\textwidth}{|l|X|X|X|}
+\hline
+\rowcolor{NavyBlue} \textcolor{white}{\textbf{Critère}} & \textcolor{white}{\textbf{Rothermel}} & \textcolor{white}{\textbf{FARSITE}} & \textcolor{white}{\textbf{CA + Rothermel}} \\
+\hline
+Résolution spatiale & Ponctuel & Continue & Grille discrète \\
+\hline
+Hétérogénéité terrain & Non & Oui (GIS) & Oui (par cellule) \\
+\hline
+Complexité calcul & Faible & Élevée & Modérée \\
+\hline
+Adaptabilité ML & Limitée & Limitée & \textbf{Excellente} \\
+\hline
+Déploiement embarqué & Facile & Impossible & \textbf{Possible} \\
+\hline
+\end{tabularx}
+\end{table}
+
+\subsubsection{Classification et modélisation du combustible forestier}
+
+La caractérisation physico-chimique du combustible forestier est une étape cruciale pour toute modélisation physique. Dans la formulation de Rothermel, le combustible est discrétisé en plusieurs catégories basées sur le temps de réponse à l'humidité (timelag)~:
+\begin{itemize}[nosep]
+    \item \textbf{Combustible mort 1h}~: débris fins d'un diamètre inférieur à 6~mm, réagissant très rapidement aux variations horaires de température et d'humidité relative de l'air.
+    \item \textbf{Combustible mort 10h}~: débris d'un diamètre compris entre 6~mm et 2,5~cm (petites branches).
+    \item \textbf{Combustible mort 100h}~: débris d'un diamètre compris entre 2,5~cm et 7,5~cm.
+    \item \textbf{Combustible vivant herbacé et vivant ligneux}~: plantes vivantes dont le taux d'humidité interne dépend du cycle biologique saisonnier et des conditions hydriques du sol.
+\end{itemize}
+
+Les systèmes de classification de combustibles standardisés, comme le NFFL (Northern Forest Fire Laboratory, 13 modèles) ou le système Scott et Burgan (40 modèles), définissent pour chaque modèle les charges massiques de chaque classe, le rapport surface-volume (SAV, $\sigma$), la profondeur du lit de combustible ($\delta$), l'humidité d'extinction ($m_x$), et le contenu minéral. Le défi réside dans l'absence de modèles standardisés décrivant fidèlement la végétation marocaine et africaine (ex. les savanes, l'arganeraie ou les forêts de chêne-liège), ce qui nécessite une calibration locale spécifique.
+
+\subsubsection{Rovers autonomes pour la surveillance environnementale}
+
+La robotique de terrain pour la surveillance environnementale a connu des avancées significatives ces dernières années. Les rovers d'exploration planétaire (Curiosity, Perseverance) ont démontré la viabilité des architectures rocker-bogie pour le franchissement d'obstacles. Dans le domaine agricole, les robots de surveillance des cultures utilisent des capteurs multispectraux et des algorithmes de navigation autonome.
+
+Pour la surveillance forestière, les contraintes incluent~: terrain irrégulier, couvert végétal dense, absence de réseau cellulaire, et nécessité d'autonomie énergétique prolongée. Notre approche utilise un châssis WildWilly 6WD/6WS à mécanisme rocker-bogie, offrant une stabilité sur terrain accidenté avec six roues motrices et directrices.
+
+\subsubsection{Planification de chemin dynamique en robotique tout-terrain}
+
+La planification de trajectoire dans des environnements dynamiques et incertains (ex. en présence d'un front de feu en progression) représente un problème complexe. Les algorithmes de planification classiques comme Dijkstra ou A* nécessitent de recalculer entièrement le chemin depuis la position courante du robot chaque fois qu'une cellule de la grille est modifiée (ex. lorsqu'une cellule prend feu). Ce calcul complet est prohibitif en termes de ressources de calcul embarquées sur un microcontrôleur ou un nano-ordinateur comme la Raspberry Pi 4.
+
+L'algorithme D* Lite (Koenig et Likhachev, 2002) résout ce problème en planifiant le chemin en sens inverse (de l'objectif vers la position de départ du robot) et en stockant les estimations de coût dans une file d'attente à priorités. Lorsque des changements de coûts de transition se produisent (les cellules en feu devenant infranchissables), D* Lite met à jour de manière incrémentale uniquement les cellules dont le coût a changé, garantissant le même chemin optimal qu'A* mais avec une réduction de plusieurs ordres de grandeur du temps de calcul.
+
+\subsubsection{Apprentissage automatique pour la correction de modèles physiques}
+
+Plusieurs travaux ont démontré l'intérêt de combiner modèles physiques et apprentissage automatique pour la prédiction du comportement des feux~:
+
+\begin{itemize}[nosep]
+    \item Cruz et al. (2015) ont montré que les modèles empiriques sous-estiment systématiquement la vitesse de propagation dans certaines conditions de vent fort.
+    \item Les approches par forêts aléatoires et gradient boosting permettent de capturer les interactions non linéaires entre variables environnementales que le modèle de Rothermel ne modélise pas.
+    \item L'utilisation de réseaux de neurones (MLP) pour corriger le $\Delta$ROS (écart entre prédiction Rothermel et observation) constitue une approche hybride prometteuse qui préserve l'interprétabilité physique.
+\end{itemize}
+
+\subsubsection{Communication IoT longue portée}
+
+La technologie LoRa (Long Range) est particulièrement adaptée à la surveillance forestière grâce à sa portée (2--15 km en milieu rural), sa faible consommation énergétique et sa capacité à fonctionner sans infrastructure réseau. Le protocole CBOR (Concise Binary Object Representation) permet un encodage compact des données de télémétrie, adapté aux contraintes de bande passante de LoRa (max 240 octets par paquet).
+
+% ------------------------------------------------------------
+\subsection{Mise en place de la solution}
+
+\subsubsection{Architecture globale}
+
+Le système BurnTrack est architecturé en deux sous-systèmes communicant par liaison LoRa~:
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.95\textwidth}
+\small
+\begin{verbatim}
+  +---------------------------------------------------------+
+  |  STATION DE BASE (PC)                                   |
+  |  +--------------+  +---------------+  +--------------+  |
+  |  | Simulation   |->| Planificateur |->| Dashboard    |  |
+  |  | CA+Rothermel |  | de mission    |  | Flask (web)  |  |
+  |  +--------------+  +---------------+  +--------------+  |
+  |        ^                  |                             |
+  |        | telemetrie       | TARGET_UPDATE               |
+  |  +-----------------------------------------------------+|
+  |  | Passerelle ESP32 LoRa (USB serie)                   ||
+  |  +-----------------------------------------------------+|
+  +---------------------------------------------------------+
+                         LoRa 868 MHz
+  +---------------------------------------------------------+
+  |  ROVER (Raspberry Pi 4)                                 |
+  |  +----------+ +-----------+ +-----------+ +----------+  |
+  |  | Capteurs |>|Cinematique|>| Mission   |>| Comms    |  |
+  |  | + Vision | |           | | Supervisor| | LoRa     |  |
+  |  +----------+ +-----------+ +-----------+ +----------+  |
+  +---------------------------------------------------------+
+\end{verbatim}
+\end{minipage}
+\caption{Architecture du système BurnTrack}
+\label{fig:architecture}
+\end{figure}
+
+Le \textbf{rover} est une plateforme de collecte de données. Il reçoit une liste de waypoints, navigue vers chacun en utilisant GPS + IMU + odométrie, capture une image pour classification botanique, collecte un paquet de données environnementales, et transmet le tout à la station de base par LoRa.
+
+La \textbf{station de base} exécute le modèle de simulation (automate cellulaire couplé au moteur Rothermel), intègre les données reçues dans la grille de simulation, et détermine les prochains points d'échantillonnage en fonction de la valeur informationnelle de chaque cellule.
+
+\subsubsection{Choix technologiques}
+
+\begin{table}[H]
+\centering
+\caption{Composants matériels du rover BurnTrack}
+\label{tab:bom}
+\begin{tabularx}{\textwidth}{|l|l|X|}
+\hline
+\rowcolor{NavyBlue} \textcolor{white}{\textbf{Composant}} & \textcolor{white}{\textbf{Référence}} & \textcolor{white}{\textbf{Justification}} \\
+\hline
+Microcontrôleur & Raspberry Pi 4 (4Go) & Inférence ML ONNX, caméra USB, GPIO \\
+\hline
+Châssis & WildWilly 6WD/6WS & Rocker-bogie tout-terrain \\
+\hline
+Moteurs & 6$\times$ 25GA-370 (12V) & Couple suffisant pour terrain forestier \\
+\hline
+Servos direction & 6$\times$ MG90S & Direction indépendante par roue \\
+\hline
+Drivers moteur & 3$\times$ L298N & Contrôle bidirectionnel par banque de 2 \\
+\hline
+Extension PWM & PCA9685 16 canaux & Commande servo + moteur à 50~Hz \\
+\hline
+ADC & ADS1015 (12 bits) & Mesure tension batterie, capteurs analogiques \\
+\hline
+IMU & MPU6050 & Heading + compensation d'inclinaison \\
+\hline
+GPS & NEO-6M & Navigation waypoint \\
+\hline
+Temp/Humidité & DHT11 & Conditions environnementales locales \\
+\hline
+Qualité air & MQ135 & Détection fumée et gaz \\
+\hline
+Anémomètre & 5$\times$ SS41F Hall & Vitesse et direction du vent (DIY) \\
+\hline
+Caméra & USB 1080p & Classification espèces + sécheresse \\
+\hline
+Radio & RFM95W (SX1276) & LoRa 868~MHz, portée $>$ 2~km \\
+\hline
+Batterie & LiPo 3S 11,1V 2200~mAh & Autonomie estimée $\sim$45 min \\
+\hline
+Régulateur & LM2596 DC-DC & 12V $\rightarrow$ 5V pour RPi4 \\
+\hline
+\end{tabularx}
+\end{table}
+
+\paragraph{Caveat matériel.} La table~\ref{tab:bom} présente la liste des composants retenus pour le rover et leur justification. À ce stade du projet, seuls le schéma Fritzing (\texttt{circuit/}) et les scripts de déploiement génériques pour Raspberry Pi sont versionnés dans le dépôt. Les pilotes spécifiques (LoRa/CBOR, MPU6050, ADS1015, NEO-6M, etc.), le firmware embarqué et les fichiers de fabrication 3D n'y figurent pas encore. La communication décrite en \S~5.5.8 est donc une architecture cible validée par le schéma électrique, et non une pile logicielle opérationnelle testée en conditions réelles.
+
+\subsubsection{Modèles de combustible africains}
+
+L'une des contributions principales de ce projet est le développement de \textbf{28 modèles de combustible} spécifiques aux écosystèmes africains, s'ajoutant aux 22 modèles BEHAVE standard implémentés dans le moteur (sur les 40 que compte le système Scott \& Burgan, 2005). Au total, BurnTrack embarque donc \textbf{50 modèles de combustible}. Ces modèles sont organisés en deux familles~:
+
+\paragraph{Afrique du Nord (10 modèles)~:} Steppe marocaine (\textit{Artemisia, Stipa}), steppe dense (Haut Atlas), arganeraie, chênaie-liège (\textit{Quercus suber}), cédraie de l'Atlas (\textit{Cedrus atlantica}), maquis méditerranéen, plaine céréalière, palmeraie (\textit{Phoenix dactylifera}), ripisylve à tamarix, jujubier (\textit{Ziziphus lotus}).
+
+\paragraph{Afrique subsaharienne (18 modèles)~:} Savanes sahéliennes (herbeuse et arborée), savanes soudaniennes (herbeuse et boisée), miombo (dense et clair), mopane, savane à acacias, grassland fertile (type Serengeti), fynbos (jeune et mature), bushveld, savane à baobabs, forêt tropicale sèche, forêt afromontane, mangrove, pâturages (dégradé et intact).
+
+Chaque modèle est caractérisé par 15 paramètres physiques~: charges de combustible par classe de temps (1h, 10h, 100h, vivant herbacé, vivant ligneux), rapports surface/volume (SAV), profondeur du lit, humidité d'extinction, et chaleurs de combustion.
+
+\begin{table}[H]
+\centering
+\caption{Extrait des modèles de combustible --- paramètres clés}
+\label{tab:fuel_models}
+\begin{tabular}{|l|c|c|c|c|c|}
+\hline
+\rowcolor{NavyBlue} \textcolor{white}{\textbf{Code}} & \textcolor{white}{\textbf{$w_{1h}$}} & \textcolor{white}{\textbf{$\delta$}} & \textcolor{white}{\textbf{$\sigma_{1h}$}} & \textcolor{white}{\textbf{$m_x$}} & \textcolor{white}{\textbf{Région}} \\
+\rowcolor{NavyBlue}  & \textcolor{white}{(kg/m²)} & \textcolor{white}{(m)} & \textcolor{white}{($\text{m}^{-1}$)} & \textcolor{white}{(\%)} & \\
+\hline
+AF\_STEPPE & 0,25 & 0,25 & 12\,000 & 20 & Maroc \\
+AF\_CEDRE & 0,30 & 0,25 & 10\,000 & 30 & Moyen Atlas \\
+AF\_MAQUIS & 0,60 & 0,50 & 7\,000 & 20 & Rif \\
+AF\_MIOMBO & 0,40 & 0,50 & 9\,000 & 25 & Afr. australe \\
+AF\_FYNBOS & 0,50 & 0,70 & 12\,000 & 25 & Cap \\
+GR4 (réf.) & 4,15 & 0,61 & 3\,444 & 15 & BEHAVE std \\
+\hline
+\end{tabular}
+\end{table}
+
+De plus, un système de mapping permet de lier 17 espèces botaniques identifiées par la caméra du rover directement aux modèles de combustible correspondants (\textit{Acacia} $\rightarrow$ AF\_ACACIA\_SAVANNA, \textit{Brachystegia} $\rightarrow$ AF\_MIOMBO, etc.), fermant ainsi la boucle vision--simulation.
+
+% NOTE: Sections 4.5 through end will continue in the next part
+\input{rapport_part2}
+
+\end{document}
+

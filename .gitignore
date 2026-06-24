@@ -233,4 +233,20 @@ robot_vision/eval_images/
 models/*.pt
 models/*.joblib
 models/*.json
+ignored
 
+# BurnTrack large raw data — keep local only (7.4 GB ERA5/FIRMS/SRTM/WorldCover)
+south africa data/
+data/processed/chunks/
+*.grib
+*.grib.*
+*.grib-*-*.idx
+data/firms_data.zip
+data/firms.csv
+data/processed/african_ground_truth.csv
+
+# Local-only scratch/reference
+_local/
+
+# Experiments outputs (per pm.md policy)
+experiments/out/
