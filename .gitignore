@@ -250,3 +250,14 @@ _local/
 
 # Experiments outputs (per pm.md policy)
 experiments/out/
+
+# LaTeX build artifacts
+*.aux
+*.lof
+*.lot
+*.toc
+*.log
+*.out
+
+# Old/stale figures folder (the real ones live in rapport/figures/)
+/figures/
