@@ -267,9 +267,12 @@ def compute_rothermel_baseline(
     results = []
     for idx, row in df.iterrows():
         region = row.get("region", "")
-        fm_code = match_fuel_model_by_region(region, fuel_models_per_region)
-        if fuel_model_code is not None:
+        if "fuel_model_code" in row and pd.notna(row["fuel_model_code"]):
+            fm_code = row["fuel_model_code"]
+        elif fuel_model_code is not None:
             fm_code = fuel_model_code
+        else:
+            fm_code = match_fuel_model_by_region(region, fuel_models_per_region)
 
         fuel = get_fuel_model_fn(fm_code)
         if fuel is None:

@@ -99,91 +99,110 @@ class PropagationRules:
             angle_wind_slope=angle_wind_slope
         )
 
-        return self.engine.compute(fuel, cell.moisture, conditions)
+        out = self.engine.compute(fuel, cell.moisture, conditions)
+        # Remplacer spread_direction (qui est relatif dans RothermelEngine) par l'azimut géographique absolu
+        out.spread_direction = _max_spread_direction(cell.wind_dir_deg, cell.aspect_deg, cell.wind_speed_ms, cell.slope_pct)
+        return out
 
     def apply_step(self, grid: Grid, dt_min: float) -> List[Tuple[int, int]]:
         """
-        Avance l'état de la grille d'un pas de temps dt_min.
+        Avance l'état de la grille d'un pas de temps dt_min avec substepping CFL adaptatif.
         Retourne la liste des nouvelles cellules enflammées (i, j).
         """
-        new_ignitions: List[Tuple[int, int]] = []
+        # Pour éviter l'amortissement numérique (verrouillage CFL) sur les vitesses élevées,
+        # on subdivise le pas de temps macro en N sous-pas (CFL substepping)
+        N_substeps = 10
+        sub_dt = dt_min / N_substeps
+        
+        all_new_ignitions: List[Tuple[int, int]] = []
         ignited_set = set()
-        to_extinguish: List[Tuple[int, int]] = []
 
-        # --- Pass 1 ---
-        for i in range(grid.rows):
-            for j in range(grid.cols):
-                src = grid.cells[i][j]
+        for _ in range(N_substeps):
+            new_ignitions: List[Tuple[int, int]] = []
+            to_extinguish: List[Tuple[int, int]] = []
+            buffer_increases = {}
 
-                if src.state != CellState.BURNING:
-                    continue
+            # --- Pass 1 ---
+            for i in range(grid.rows):
+                for j in range(grid.cols):
+                    src = grid.cells[i][j]
 
-                # Avancer le compteur de combustion
-                if src.burn_elapsed + dt_min >= src.burn_duration:
-                    src.burn_elapsed = src.burn_duration
-                    to_extinguish.append((i, j))
-                    continue   # ne propage plus depuis une cellule mourante
-                src.burn_elapsed += dt_min
-
-                # Fuel model de la source
-                fm_raw = grid.get_fuel(src.fuel_code)
-                if fm_raw is None:
-                    continue
-                fuel = _to_roth_fuel(fm_raw)
-
-                # Propagation vers chaque voisin UNBURNED
-                for ni, nj, dist, spread_dir in grid.neighbors(i, j):
-                    tgt = grid.cells[ni][nj]
-                    if tgt.state != CellState.UNBURNED:
-                        continue
-                    if (ni, nj) in ignited_set:
+                    if src.state != CellState.BURNING:
                         continue
 
-                    # Calcul du ROS dans la direction du voisin
-                    out_src = self.compute_cell_ros(src, grid)
-                    ros_base = out_src.ros
+                    # Avancer le compteur de combustion
+                    if src.burn_elapsed + sub_dt >= src.burn_duration:
+                        src.burn_elapsed = src.burn_duration
+                        to_extinguish.append((i, j))
+                        continue   # ne propage plus depuis une cellule mourante
+                    src.burn_elapsed += sub_dt
 
-                    # Ajout de la correction IA si activée
-                    ros_final = ros_base
-                    if self.use_corrector and src.delta_ros != 0.0:
-                        ros_final = max(0.0, ros_base + src.delta_ros)
-
-                    if ros_final <= 0.0:
+                    # Fuel model de la source
+                    fm_raw = grid.get_fuel(src.fuel_code)
+                    if fm_raw is None:
                         continue
+                    fuel = _to_roth_fuel(fm_raw)
 
-                    # Direction de propagation maximale vs direction du voisin
-                    max_dir = out_src.spread_direction
-                    theta = np.radians(spread_dir - max_dir)
-                    # Formule d'ellipse simplifiée pour le ROS directionnel
-                    ros_dir = ros_final * np.cos(theta)
+                    # Propagation vers chaque voisin UNBURNED
+                    for ni, nj, dist, spread_dir in grid.neighbors(i, j):
+                        tgt = grid.cells[ni][nj]
+                        if tgt.state != CellState.UNBURNED:
+                            continue
+                        if (ni, nj) in ignited_set:
+                            continue
 
-                    if ros_dir <= 0.0:
-                        continue
+                        # Calcul du ROS dans la direction du voisin
+                        out_src = self.compute_cell_ros(src, grid)
+                        ros_base = out_src.ros
 
-                    # Temps requis pour franchir la distance entre les centres des deux cellules
-                    time_to_spread = dist / ros_dir  # en minutes
+                        # Ajout de la correction IA si activée
+                        ros_final = ros_base
+                        if self.use_corrector and src.delta_ros != 0.0:
+                            ros_final = max(0.0, ros_base + src.delta_ros)
 
-                    # Probabilité de propagation sur ce pas de temps (dt)
-                    prob = 1.0 - np.exp(-dt_min / time_to_spread)
+                        if ros_final <= 0.0:
+                            continue
 
-                    if np.random.rand() < prob:
-                        new_ignitions.append((ni, nj))
-                        ignited_set.add((ni, nj))
+                        # Direction de propagation maximale vs direction du voisin
+                        max_dir = out_src.spread_direction
+                        theta = np.radians(spread_dir - max_dir)
+                        # Formule d'ellipse simplifiée pour le ROS directionnel
+                        ros_dir = ros_final * np.cos(theta)
 
-        # --- Pass 2 : Application des changements d'état ---
-        for i, j in to_extinguish:
-            grid.cells[i][j].state = CellState.BURNED
+                        if ros_dir <= 0.0:
+                            continue
 
-        for i, j in new_ignitions:
-            cell = grid.cells[i][j]
-            cell.state = CellState.BURNING
-            cell.ignition_time = dt_min  # sera ajusté par le runner principal
-            # Calcul de sa propre durée de combustion via le temps de résidence Rothermel (tau)
-            out = self.compute_cell_ros(cell, grid)
-            tau = getattr(out, 'tau', None) or getattr(out, 'residence_time', None)
-            cell.burn_duration = max(10.0, float(tau)) if tau else 15.0
+                        # Temps requis pour franchir la distance entre les centres des deux cellules
+                        time_to_spread = dist / ros_dir  # en minutes
 
-        return new_ignitions
+                        # Accumulateur sub-grid d'énergie thermique (prend le flux advectif maximal)
+                        inc = sub_dt / time_to_spread
+                        if (ni, nj) not in buffer_increases or inc > buffer_increases[(ni, nj)]:
+                            buffer_increases[(ni, nj)] = inc
+
+            # Application des incréments de buffer
+            for (ni, nj), inc in buffer_increases.items():
+                tgt = grid.cells[ni][nj]
+                tgt.ignition_buffer += inc
+                if tgt.ignition_buffer >= tgt.ignition_threshold:
+                    new_ignitions.append((ni, nj))
+                    ignited_set.add((ni, nj))
+                    all_new_ignitions.append((ni, nj))
+
+            # --- Pass 2 : Application des changements d'état ---
+            for i, j in to_extinguish:
+                grid.cells[i][j].state = CellState.BURNED
+
+            for i, j in new_ignitions:
+                cell = grid.cells[i][j]
+                cell.state = CellState.BURNING
+                cell.ignition_time = dt_min  # sera ajusté par le runner principal
+                # Calcul de sa propre durée de combustion via le temps de résidence Rothermel (tau)
+                out = self.compute_cell_ros(cell, grid)
+                tau = getattr(out, 'tau', None) or getattr(out, 'residence_time', None)
+                cell.burn_duration = max(10.0, float(tau)) if tau else 15.0
+
+        return all_new_ignitions
 
 
 # ---------------------------------------------------------------------------

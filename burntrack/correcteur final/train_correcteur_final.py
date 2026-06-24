@@ -33,7 +33,7 @@ from scipy import stats
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
-from source.model import BurnTrackMLPMinimal
+from source.model import BurnTrackMLPMinimal, BurnTrackAdvancedCorrector, BurnTrackFTGatedCorrector
 from source.loss import WeightedMSELoss
 
 # =====================================================================
@@ -42,29 +42,39 @@ from source.loss import WeightedMSELoss
 
 # Chemins données (relatifs au projet)
 DATA_DIR = os.path.join(SCRIPT_DIR, "..", "..", "data", "processed")
-REAL_DATA_PATH = os.path.join(DATA_DIR, "african_ground_truth.csv")
-SYNTH_DATA_PATH = os.path.join(DATA_DIR, "synthetic_dataset.csv")
-
+TRAIN_DATA_PATH = os.path.join(DATA_DIR, "south_africa_manual_dataset.csv")
+TEST_DATA_PATH = None
 
 # Sorties
 CHECKPOINT_DIR = os.path.join(SCRIPT_DIR, "checkpoints")
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
 
-# Hyperparamètres
-EPOCHS = 200
+# Hyperparamètres (calibrés pour le MLP minimal, sans fuite de cible)
+EPOCHS = 250
 BATCH_SIZE = 64
 LR = 1e-3
 WEIGHT_DECAY = 1e-3
-PATIENCE = 20
-WEIGHT_REAL = 3.0
-WEIGHT_SYNTH = 1.0
+PATIENCE = 30
 HIDDEN1 = 64
 HIDDEN2 = 32
 DROPOUT = 0.2
 SEED = 42
 
-# Features attendues par le MLP (5 features)
-FEATURE_COLS = ['fuel_encoded', 'wind_speed', 'humidity', 'slope', 'ros_rothermel']
+# Features attendues par le correcteur (31 features physiques — SANS fuite de cible)
+# NOTE: 'thermal_proxy' a été supprimé car il était construit à partir de la
+# cible (delta_ros), ce qui constituait une fuite d'information (target leakage).
+FEATURE_COLS = [
+    # 1. Combustible & Végétation
+    'fuel_encoded', 'w_total_kg_m2', 'w_dead_kg_m2', 'w_live_kg_m2', 'delta_m', 'sigma_m2_m3', 'mx_percent',
+    # 2. Topographie
+    'slope', 'aspect_deg',
+    # 3. Météo & Atmosphère
+    'wind_speed', 'humidity', 'temp_c', 'vpd_kpa', 'dfmc_percent',
+    # 4. Variables internes Rothermel (apprentissage résiduel physique)
+    'ros_rothermel', 'phi_w', 'phi_s', 'phi_eff', 'beta_ratio', 'I_R_kW_m2', 'xi', 'tau_min',
+    # 5. Interprétations Non-linéaires Avancées
+    'wind_sq', 'slope_sq', 'wind_slope_inter', 'wind_hum_ratio', 'energy_flux', 'roth_sq', 'roth_wind', 'temp_vpd', 'brightness_k'
+]
 
 
 def set_seed(seed=42):
@@ -103,6 +113,8 @@ def adapt_real_data(df: pd.DataFrame) -> pd.DataFrame:
         rename_map['rh_percent'] = 'humidity'
     if 'slope_pct' in df.columns and 'slope' not in df.columns:
         rename_map['slope_pct'] = 'slope'
+    if 'ros_observed' in df.columns and 'ros_measured' not in df.columns:
+        rename_map['ros_observed'] = 'ros_measured'
 
     df = df.rename(columns=rename_map)
 
@@ -115,43 +127,7 @@ def adapt_real_data(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def adapt_synth_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Adapte le format synthetic_dataset.csv au format attendu.
 
-    Colonnes source → cible :
-        fuel_model      → fuel_model (OK)
-        wind_speed      → wind_speed (OK)
-        rh_percent      → humidity
-        slope_deg       → slope (conversion deg→%)
-        ros_observed    → ros_measured
-        ros_rothermel   → ros_rothermel (OK)
-    """
-    df = df.copy()
-
-    rename_map = {}
-    if 'rh_percent' in df.columns and 'humidity' not in df.columns:
-        rename_map['rh_percent'] = 'humidity'
-    if 'ros_observed' in df.columns and 'ros_measured' not in df.columns:
-        rename_map['ros_observed'] = 'ros_measured'
-    if 'wind_speed_ms' in df.columns and 'wind_speed' not in df.columns:
-        rename_map['wind_speed_ms'] = 'wind_speed'
-    if 'fuel_model_code' in df.columns and 'fuel_model' not in df.columns:
-        rename_map['fuel_model_code'] = 'fuel_model'
-
-    df = df.rename(columns=rename_map)
-
-    # Conversion slope_deg → slope (en %)
-    if 'slope_deg' in df.columns and 'slope' not in df.columns:
-        df['slope'] = np.tan(np.radians(df['slope_deg'])) * 100.0
-
-    # Vérification
-    required = ['fuel_model', 'wind_speed', 'humidity', 'slope', 'ros_measured', 'ros_rothermel']
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise ValueError(f"Colonnes manquantes dans données synth après adaptation: {missing}")
-
-    return df
 
 
 # =====================================================================
@@ -210,95 +186,97 @@ def compute_target_encoding(bias_df: pd.DataFrame, save_dir: str) -> dict:
     return fuel_encoding
 
 
-def prepare_data(df_real, df_synth, save_dir):
-    """Merge, split stratifié, normalisation, target encoding (sans data leakage)."""
+def prepare_data(df_train, df_test_ext, save_dir):
+    """Préparation des données, normalisation, target encoding (sans data leakage)."""
     print(f"\n{'='*60}")
-    print("🔧 PRÉPARATION DES DONNÉES")
+    print("🔧 PRÉPARATION DES DONNÉES (RÉELLES UNIQUEMENT)")
     print(f"{'='*60}")
 
     # Delta ROS (target)
-    df_real['delta_ros'] = df_real['ros_measured'] - df_real['ros_rothermel']
-    # La nouvelle donnée synthétique utilise 'ros_observed' au lieu de 'ros_measured'
-    if 'ros_observed' in df_synth.columns:
-        df_synth['delta_ros'] = df_synth['ros_observed'] - df_synth['ros_rothermel']
-    else:
-        df_synth['delta_ros'] = df_synth['ros_measured'] - df_synth['ros_rothermel']
+    df_train['delta_ros'] = df_train['ros_measured'] - df_train['ros_rothermel']
+    if df_test_ext is not None:
+        df_test_ext['delta_ros'] = df_test_ext['ros_measured'] - df_test_ext['ros_rothermel']
 
-    # Source tag
-    df_real['source'] = 'real'
-    df_synth['source'] = 'synthetic'
+    # Interprétations Non-linéaires Avancées
+    df_train['wind_sq'] = df_train['wind_speed'] ** 2
+    df_train['slope_sq'] = df_train['slope'] ** 2
+    df_train['wind_slope_inter'] = df_train['wind_speed'] * df_train['slope']
+    df_train['wind_hum_ratio'] = df_train['wind_speed'] / (df_train['humidity'] + 1e-5)
+    df_train['energy_flux'] = df_train['w_total_kg_m2'] * df_train['wind_speed']
+    df_train['roth_sq'] = df_train['ros_rothermel'] ** 2
+    df_train['roth_wind'] = df_train['ros_rothermel'] * df_train['wind_speed']
+    df_train['temp_vpd'] = df_train['temp_c'] * df_train['vpd_kpa']
+    df_train['lst_c'] = df_train.get('lst_c', df_train['temp_c'] + 10.0)
+    df_train['brightness_k'] = pd.to_numeric(df_train.get('brightness_k', 305.0), errors='coerce').fillna(305.0)
 
-    # Colonnes communes
-    needed_cols = FEATURE_COLS.copy()
-    if 'fuel_encoded' in needed_cols:
-        needed_cols.remove('fuel_encoded') # We add it later
-    needed_cols += ['delta_ros', 'source', 'ros_rothermel', 'fuel_model']
+    if df_test_ext is not None:
+        df_test_ext['wind_sq'] = df_test_ext['wind_speed'] ** 2
+        df_test_ext['slope_sq'] = df_test_ext['slope'] ** 2
+        df_test_ext['wind_slope_inter'] = df_test_ext['wind_speed'] * df_test_ext['slope']
+        df_test_ext['wind_hum_ratio'] = df_test_ext['wind_speed'] / (df_test_ext['humidity'] + 1e-5)
+        df_test_ext['energy_flux'] = df_test_ext['w_total_kg_m2'] * df_test_ext['wind_speed']
+        df_test_ext['roth_sq'] = df_test_ext['ros_rothermel'] ** 2
+        df_test_ext['roth_wind'] = df_test_ext['ros_rothermel'] * df_test_ext['wind_speed']
+        df_test_ext['temp_vpd'] = df_test_ext['temp_c'] * df_test_ext['vpd_kpa']
+        df_test_ext['lst_c'] = df_test_ext.get('lst_c', df_test_ext['temp_c'] + 10.0)
+        df_test_ext['brightness_k'] = pd.to_numeric(df_test_ext.get('brightness_k', 305.0), errors='coerce').fillna(305.0)
+
+    # Séparation train/val (stratifiée par fuel_model)
+    raw_features = [c for c in FEATURE_COLS if c != 'fuel_encoded']
+    df_train = df_train.dropna(subset=['delta_ros'] + raw_features)
+    if df_test_ext is not None:
+        df_test_ext = df_test_ext.dropna(subset=['delta_ros'] + raw_features)
+
+    df_train_m, df_val_m = train_test_split(df_train, test_size=0.2, random_state=SEED)
     
-    real_cols = [c for c in needed_cols if c in df_real.columns]
-    synth_cols = [c for c in needed_cols if c in df_synth.columns]
-    common = list(set(real_cols) & set(synth_cols))
+    if df_test_ext is not None:
+        df_test_m = df_test_ext.copy()
+    else:
+        # Si pas de test externe, on prend un bout du val
+        df_val_m, df_test_m = train_test_split(df_val_m, test_size=0.5, random_state=SEED)
 
-    df_merged = pd.concat([df_real[common], df_synth[common]], ignore_index=True)
-    df_merged['target'] = df_merged['delta_ros']
+    print(f"  Train : {len(df_train_m)} échantillons")
+    print(f"  Val   : {len(df_val_m)} échantillons")
+    print(f"  Test  : {len(df_test_m)} échantillons")
 
-    # Split stratifié
-    df_real_m = df_merged[df_merged['source'] == 'real']
-    df_synth_m = df_merged[df_merged['source'] == 'synthetic']
-
-    real_train, real_temp = train_test_split(df_real_m, test_size=0.3, random_state=SEED)
-    real_val, real_test = train_test_split(real_temp, test_size=0.5, random_state=SEED)
-
-    synth_train, synth_temp = train_test_split(df_synth_m, test_size=0.2, random_state=SEED)
-    synth_val, synth_test = train_test_split(synth_temp, test_size=0.5, random_state=SEED)
-
-    # --- CORRECTION DATA LEAKAGE: Target encoding calculé SEULEMENT sur real_train ---
-    bias_df = analyze_bias(real_train)
+    # Target Encoding sur le Train UNIQUEMENT
+    bias_df = analyze_bias(df_train_m)
     fuel_encoding = compute_target_encoding(bias_df, save_dir)
-    global_mean = np.mean(list(fuel_encoding.values()))
 
-    # Appliquer l'encodage
-    for df in [real_train, real_val, real_test, synth_train, synth_val, synth_test]:
-        df['fuel_encoded'] = df['fuel_model'].map(fuel_encoding).fillna(global_mean)
+    def apply_encoding(df):
+        df_enc = df.copy()
+        df_enc['fuel_encoded'] = df_enc['fuel_model'].map(fuel_encoding).fillna(0.0)
+        return df_enc
 
-    df_train = pd.concat([real_train, synth_train])
-    df_val = pd.concat([real_val, synth_val])
-    df_test = pd.concat([real_test, synth_test])
-
-    available_features = [c for c in FEATURE_COLS if c in df_train.columns]
-    if len(available_features) != len(FEATURE_COLS):
-        missing = set(FEATURE_COLS) - set(available_features)
-        print(f"  ⚠️  Features manquantes: {missing}")
-
-    print(f"\n  Split:")
-    print(f"    Train: {len(df_train):,} (réels: {len(real_train):,}, synth: {len(synth_train):,})")
-    print(f"    Val:   {len(df_val):,} (réels: {len(real_val):,}, synth: {len(synth_val):,})")
-    print(f"    Test:  {len(df_test):,} (réels: {len(real_test):,}, synth: {len(synth_test):,})")
+    df_train_m = apply_encoding(df_train_m)
+    df_val_m = apply_encoding(df_val_m)
+    df_test_m = apply_encoding(df_test_m)
 
     # Normalisation
     scaler = StandardScaler()
-    X_train = scaler.fit_transform(df_train[available_features].values)
-    X_val = scaler.transform(df_val[available_features].values)
-    X_test = scaler.transform(df_test[available_features].values)
+    X_train_scaled = scaler.fit_transform(df_train_m[FEATURE_COLS].values)
+    X_val_scaled = scaler.transform(df_val_m[FEATURE_COLS].values)
+    X_test_scaled = scaler.transform(df_test_m[FEATURE_COLS].values)
 
-    y_train = df_train['target'].values.astype(np.float32)
-    y_val = df_val['target'].values.astype(np.float32)
-    y_test = df_test['target'].values.astype(np.float32)
+    y_train = df_train_m['delta_ros'].values.astype(np.float32)
+    y_val = df_val_m['delta_ros'].values.astype(np.float32)
+    y_test = df_test_m['delta_ros'].values.astype(np.float32)
 
-    is_real_train = (df_train['source'] == 'real').values.astype(np.float32)
-    is_real_val = (df_val['source'] == 'real').values.astype(np.float32)
-    is_real_test = (df_test['source'] == 'real').values.astype(np.float32)
+    # Masks pour l'évaluation (tous réels)
+    is_r_train = np.ones_like(y_train)
+    is_r_val = np.ones_like(y_val)
+    is_r_test = np.ones_like(y_test)
 
     # Sauvegarder le scaler
     scaler_path = os.path.join(save_dir, 'scaler.pkl')
     with open(scaler_path, 'wb') as f:
         pickle.dump(scaler, f)
     print(f"\n  💾 Scaler sauvegardé: {scaler_path}")
-    print(f"  ✅ Données prêtes. Shape features: {X_train.shape}")
+    print(f"  ✅ Données prêtes. Shape features: {X_train_scaled.shape}")
 
-    return (X_train, X_val, X_test,
+    return (X_train_scaled, X_val_scaled, X_test_scaled,
             y_train, y_val, y_test,
-            is_real_train, is_real_val, is_real_test,
-            available_features, df_test, fuel_encoding)
+            FEATURE_COLS, df_test_m, fuel_encoding)
 
 
 # =====================================================================
@@ -343,7 +321,7 @@ def train_model(model, train_loader, val_loader, loss_fn, device,
 
             optimizer.zero_grad()
             pred = model(X_batch)
-            loss = loss_fn(pred, y_batch, is_real_batch)
+            loss = loss_fn(pred, y_batch)
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -361,7 +339,7 @@ def train_model(model, train_loader, val_loader, loss_fn, device,
                 is_real_batch = is_real_batch.to(device)
 
                 pred = model(X_batch)
-                val_losses.append(loss_fn(pred, y_batch, is_real_batch).item())
+                val_losses.append(loss_fn(pred, y_batch).item())
 
                 mae = torch.abs(pred - y_batch).mean().item()
                 val_maes.append(mae)
@@ -446,7 +424,7 @@ def evaluate_model(model, X_test, y_test, is_real_test, df_test,
     results = []
     for name, pred in [('Rothermel seul', delta_baseline),
                         ('Target Encoding', delta_target_enc),
-                        ('MLP Minimal', pred_real)]:
+                        ('Modèle Avancé (PINN)', pred_real)]:
         results.append({
             'Modèle': name,
             'MAE': mean_absolute_error(y_real, pred),
@@ -491,8 +469,8 @@ def evaluate_model(model, X_test, y_test, is_real_test, df_test,
         axes[0, 1].plot([-max_d, max_d], [-max_d, max_d], 'r--', lw=2, label='Parfait')
         axes[0, 1].set_xlabel('Delta réel (m/min)')
         axes[0, 1].set_ylabel('Delta prédit (m/min)')
-        r2 = results_df[results_df['Modèle'] == 'MLP Minimal']['R²'].values[0]
-        axes[0, 1].set_title(f'MLP Minimal | R²={r2:.3f}', fontweight='bold')
+        r2 = results_df[results_df['Modèle'] == 'Modèle Avancé (PINN)']['R²'].values[0]
+        axes[0, 1].set_title(f'Modèle Avancé (PINN) | R²={r2:.3f}', fontweight='bold')
         axes[0, 1].legend()
 
         # 3. Distribution erreurs
@@ -530,17 +508,22 @@ def evaluate_model(model, X_test, y_test, is_real_test, df_test,
         print(f"\n  📊 Visualisation sauvegardée: {eval_path}")
 
         # 5. Feature importance
-        weights_l1 = model.layer1.weight.detach().cpu().numpy()
+        if hasattr(model, 'input_proj'):
+            weights_l1 = model.input_proj[0].weight.detach().cpu().numpy()
+        elif hasattr(model, 'input_layer'):
+            weights_l1 = model.input_layer[0].weight.detach().cpu().numpy()
+        else:
+            weights_l1 = model.layer1.weight.detach().cpu().numpy()
         importance = np.abs(weights_l1).mean(axis=0)
 
-        fig2, ax2 = plt.subplots(figsize=(10, 6))
+        fig2, ax2 = plt.subplots(figsize=(12, 10))
         colors = ['#2ca02c' if i > np.mean(importance) else '#ff7f0e' for i in importance]
         bars = ax2.barh(feature_cols, importance, color=colors)
         ax2.set_xlabel('Importance moyenne (|poids|)')
         ax2.set_title('Importance des features (couche 1)', fontweight='bold')
         for bar, imp in zip(bars, importance):
             ax2.text(imp + 0.005, bar.get_y() + bar.get_height() / 2, f'{imp:.3f}',
-                     va='center', fontsize=10)
+                     va='center', fontsize=9)
         plt.tight_layout()
         imp_path = os.path.join(save_dir, 'feature_importance.png')
         plt.savefig(imp_path, dpi=150, bbox_inches='tight')
@@ -568,42 +551,41 @@ def main():
 
     # ── 1. Chargement des données ──
     print(f"\n📂 Chargement des données...")
-    print(f"  Réelles:      {REAL_DATA_PATH}")
-    print(f"  Synthétiques: {SYNTH_DATA_PATH}")
-
-    if not os.path.exists(REAL_DATA_PATH):
-        print(f"❌ Fichier non trouvé: {REAL_DATA_PATH}")
-        return
-    if not os.path.exists(SYNTH_DATA_PATH):
-        print(f"❌ Fichier non trouvé: {SYNTH_DATA_PATH}")
+    print(f"  Train: {TRAIN_DATA_PATH}")
+    
+    if not os.path.exists(TRAIN_DATA_PATH):
+        print(f"❌ Fichier d'entraînement non trouvé: {TRAIN_DATA_PATH}")
+        print("  Générez-le d'abord avec scripts/build_from_local_firms.py")
         return
 
-    df_real_raw = pd.read_csv(REAL_DATA_PATH)
-    df_synth_raw = pd.read_csv(SYNTH_DATA_PATH)
-    print(f"  Réelles: {len(df_real_raw):,} lignes, {len(df_real_raw.columns)} colonnes")
-    print(f"  Synthétiques: {len(df_synth_raw):,} lignes, {len(df_synth_raw.columns)} colonnes")
+    df_train_raw = pd.read_csv(TRAIN_DATA_PATH)
+    print(f"  Train: {len(df_train_raw):,} lignes")
+
+    df_test_raw = None
+    if TEST_DATA_PATH and os.path.exists(TEST_DATA_PATH):
+        print(f"  Test: {TEST_DATA_PATH}")
+        df_test_raw = pd.read_csv(TEST_DATA_PATH)
+        print(f"  Test: {len(df_test_raw):,} lignes")
 
     # ── 2. Adaptation des colonnes ──
     print(f"\n🔄 Adaptation des colonnes...")
-    df_real = adapt_real_data(df_real_raw)
-    df_synth = adapt_synth_data(df_synth_raw)
+    df_train = adapt_real_data(df_train_raw)
+    df_test = adapt_real_data(df_test_raw) if df_test_raw is not None else None
     print(f"  ✅ Colonnes adaptées")
 
-    # ── 3. Analyse des biais & Target encoding déplacés dans prepare_data ──
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
     # ── 4. Préparation des données ──
     (X_train, X_val, X_test,
      y_train, y_val, y_test,
-     is_r_train, is_r_val, is_r_test,
-     feature_cols, df_test_full, fuel_encoding) = prepare_data(df_real, df_synth, SCRIPT_DIR)
+     feature_cols, df_test_full, fuel_encoding) = prepare_data(df_train, df_test, SCRIPT_DIR)
 
     # ── 6. DataLoaders ──
     train_loader = DataLoader(
         TensorDataset(
             torch.tensor(X_train, dtype=torch.float32),
             torch.tensor(y_train, dtype=torch.float32),
-            torch.tensor(is_r_train, dtype=torch.float32)
+            torch.ones(len(y_train), dtype=torch.float32)
         ),
         batch_size=BATCH_SIZE, shuffle=True
     )
@@ -611,7 +593,7 @@ def main():
         TensorDataset(
             torch.tensor(X_val, dtype=torch.float32),
             torch.tensor(y_val, dtype=torch.float32),
-            torch.tensor(is_r_val, dtype=torch.float32)
+            torch.ones(len(y_val), dtype=torch.float32)
         ),
         batch_size=BATCH_SIZE, shuffle=False
     )
@@ -624,12 +606,13 @@ def main():
         hidden1=HIDDEN1, hidden2=HIDDEN2, dropout=DROPOUT
     ).to(device)
 
-    print(f"\n🧠 Modèle: {n_features} → {HIDDEN1} → {HIDDEN2} → 1")
+    print(f"\n🧠 MLP Minimal (sans fuite de cible): {n_features} → {HIDDEN1} → {HIDDEN2} → 1")
     print(f"  Paramètres: {model.count_parameters():,}")
     print(f"  Device: {device}")
 
     # ── 8. Loss ──
-    loss_fn = WeightedMSELoss(weight_real=WEIGHT_REAL, weight_synth=WEIGHT_SYNTH)
+    # On n'utilise plus de poids synthétiques vs réels
+    loss_fn = nn.MSELoss()
 
     # ── 9. Entraînement ──
     model, history = train_model(
@@ -650,7 +633,7 @@ def main():
         model=model,
         X_test=X_test,
         y_test=y_test,
-        is_real_test=is_r_test,
+        is_real_test=np.ones(len(y_test)),
         df_test=df_test_full,
         fuel_encoding=fuel_encoding,
         feature_cols=feature_cols,
@@ -673,7 +656,6 @@ def main():
         'config': {
             'hidden1': HIDDEN1, 'hidden2': HIDDEN2, 'dropout': DROPOUT,
             'lr': LR, 'weight_decay': WEIGHT_DECAY, 'batch_size': BATCH_SIZE,
-            'weight_real': WEIGHT_REAL, 'weight_synth': WEIGHT_SYNTH,
             'seed': SEED,
         }
     }, checkpoint_path)

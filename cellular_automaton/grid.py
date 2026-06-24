@@ -61,6 +61,8 @@ class Cell:
     delta_ros: float = 0.0           # correction IA du ROS
     rh_percent: float = 50.0         # humidité relative (%) — pour MLP
     temp_c: float = 25.0             # température (°C) — pour MLP
+    ignition_buffer: float = 0.0     # accumulateur d'énergie thermique sub-grid
+    ignition_threshold: float = 1.0  # seuil d'ignition (stochastique ou fixe)
 
 
 class Grid:

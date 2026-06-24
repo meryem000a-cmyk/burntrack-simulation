@@ -108,7 +108,7 @@ BEHAVE_STANDARD: Dict[str, FuelModel] = {
         code="GR4", name="Moderate load, dry climate grass",
         w_1h=4.15, w_10h=0.0, w_100h=0.0, w_live_herb=4.18, w_live_woody=0.0,
         delta=0.6096,  # 2.0 ft
-        sigma_1h=10499, sigma_10h=0.0, sigma_100h=0.0,
+        sigma_1h=3444, sigma_10h=0.0, sigma_100h=0.0,
         sigma_live_herb=9449, sigma_live_woody=0.0,
         h_dead=18608, h_live=18608, mx=15,
         is_dynamic=True, region="general",
