@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 from cellular_automaton import Grid, FireSimulation, PropagationRules
 from cellular_automaton.mlp_corrector import MLPCorrector
+from burntrack.utils.simulation import create_rules, run_adaptive
 from robot_nav import RobotNavigator, WaypointPlanner, GPSGrid
 from burntrack.engine.fuel_models import ALL_FUEL_MODELS
 
@@ -93,7 +94,7 @@ print(f"  ... ({len(wp_planner.waypoints)-5} autres)")
 # ---------------------------------------------------------------------------
 # 5. Simulation feu + robot
 # ---------------------------------------------------------------------------
-rules = PropagationRules(stochastic=True, burn_duration_factor=4.0, min_burn_min=5.0)
+rules = create_rules(stochastic=True, burn_duration_factor=4.0, min_burn_min=5.0)
 sim   = FireSimulation(grid, rules, seed=7)
 sim.ignite(2, 2)   # coin Nord-Ouest -- vent pousse vers l Est
 
@@ -111,7 +112,7 @@ print("-" * 75)
 
 t0 = time.time()
 for step in range(300):
-    sim.step(dt=1.0)
+    run_adaptive(sim, grid)
 
     # Robot se deplace toutes les 2 min (vitesse ~15 m/min = rover lent)
     if step % 2 == 0:

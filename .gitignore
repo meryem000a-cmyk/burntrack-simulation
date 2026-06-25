@@ -220,6 +220,13 @@ __marimo__/
 # CatBoost training info
 catboost_info/
 
+# Private / working notes
+whatsapp_update.txt
+pm.md
+
+# Experiments / validation (not for GitHub)
+experiments/
+
 # Robot Vision Project specific ignores
 robot_vision/datasets/
 robot_vision/.cache/
