@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import rasterio
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -599,6 +600,55 @@ def run_scenario(scenario, out_root):
             rr, cc = latlon_to_rowcol(r.latitude, r.longitude, bbox_lat, bbox_lon, n_rows, n_cols)
             real_burned_per_hour[h, rr, cc] = True
 
+    # Optional: load a Landsat-fused 30 m burned-area raster as an alternative ground truth.
+    # When provided, it overrides the FIRMS-based per-hour real_burned_per_hour.
+    # (The hourly evolution is approximated by scaling the cumulative fused area back to per-hour
+    # bins using the FIRMS cumulative curve as a time-weight, since the Landsat product is a
+    # single end-of-fire snapshot.)
+    fused_burned_raster = scenario.get("fused_burned_raster")
+    if fused_burned_raster and (PROJECT_ROOT / fused_burned_raster).exists():
+        print(f"  Loading fused 30 m burned-area raster: {fused_burned_raster}")
+        with rasterio.open(PROJECT_ROOT / fused_burned_raster) as src:
+            src_arr = src.read(1)
+            src_transform = src.transform
+            src_crs = src.crs
+        # Reproject/resample to the sim grid (rasterio.warp.reproject writes in-place)
+        from rasterio.transform import from_bounds as rio_from_bounds
+        from rasterio.warp import reproject as rio_reproject
+        from rasterio.enums import Resampling as RioResampling
+        dst_transform = rio_from_bounds(bbox_lon[0], bbox_lat[0], bbox_lon[1], bbox_lat[1], n_cols, n_rows)
+        dst = np.zeros((n_rows, n_cols), dtype=np.float32)
+        rio_reproject(
+            source=src_arr.astype(np.float32),
+            destination=dst,
+            src_transform=src_transform,
+            src_crs=src_crs,
+            dst_transform=dst_transform,
+            dst_crs=rasterio.crs.CRS.from_epsg(4326),
+            resampling=RioResampling.nearest,
+        )
+        fused_mask = (dst > 0.5)
+        print(f"  Fused burned cells (sim grid): {int(fused_mask.sum())} / {fused_mask.size} "
+              f"({100 * fused_mask.mean():.1f} %)")
+        # Approximate hourly evolution: scale the cumulative curve by the FIRMS time distribution
+        firms_cum = real_burned_per_hour.any(axis=(1, 2)).astype(float)  # (H+1,)
+        if firms_cum[-1] > 0:
+            time_weight = firms_cum / firms_cum[-1]
+        else:
+            time_weight = np.linspace(0, 1, n_hours + 1)
+        for h in range(n_hours + 1):
+            # Take a submask of the fused burned area proportional to the time fraction
+            n_target = int(round(time_weight[h] * int(fused_mask.sum())))
+            if n_target >= int(fused_mask.sum()):
+                real_burned_per_hour[h] = fused_mask
+            elif n_target == 0:
+                real_burned_per_hour[h] = np.zeros_like(fused_mask)
+            else:
+                # Pick the first n_target burned cells (deterministic)
+                idx = np.argwhere(fused_mask)
+                sel = idx[:n_target]
+                real_burned_per_hour[h][sel[:, 0], sel[:, 1]] = True
+
     # 2. Load SRTM -> slope/aspect/elevation
     print("\n[2/6] Loading SRTM DEM...")
     srtm_tiles = load_srtm_tiles(bbox_lat, bbox_lon, PROJECT_ROOT / scenario["srtm_dir"])
@@ -679,6 +729,7 @@ def run_scenario(scenario, out_root):
         "cell_size_m": scenario["cell_size_m"],
         "duration_h": n_hours,
         "n_ensemble": scenario["n_ensemble"],
+        "fused_burned_raster": scenario.get("fused_burned_raster"),
         "final_metrics": final_metrics,
         "hourly_metrics": hourly_metrics,
     }

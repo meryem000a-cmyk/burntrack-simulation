@@ -1,20 +1,27 @@
 scenarios:
-  - id: table_mountain_2021_04
-    name: "Table Mountain wildfire, April 2021"
-    firms_csv: data/processed/table_mountain_2021.csv
-    bbox_lat: [-33.962, -33.933]
-    bbox_lon: [18.418, 18.470]
-    grid_size: [40, 40]
-    cell_size_m: 100
-    start_time: "2021-04-19T00:00"
-    duration_h: 12
-    weather_source: era5_grib
-    srtm_dir: south africa data/srtm
-    worldcover_dir: south africa data/worldcover
-    grib_path: south africa data/data.grib
-    n_ensemble: 15
-    seed: 42
-    dt_min: 0.25
-    wind_speed_jitter: 0.20
-    wind_dir_jitter_deg: 15.0
-    moisture_jitter: 0.02
+- bbox_lat:
+  - -33.962
+  - -33.933
+  bbox_lon:
+  - 18.418
+  - 18.47
+  cell_size_m: 100
+  dt_min: 0.25
+  duration_h: 12
+  firms_csv: data/processed/table_mountain_2021.csv
+    fused_burned_raster: south africa data/table_mountain_2021/burned_area_40x40_0.40.tif
+  grib_path: south africa data/data.grib
+  grid_size:
+  - 40
+  - 40
+  id: table_mountain_2021_04
+  moisture_jitter: 0.02
+  n_ensemble: 15
+  name: Table Mountain wildfire, April 2021
+  seed: 42
+  srtm_dir: south africa data/srtm
+  start_time: 2021-04-19T00:00
+  weather_source: era5_grib
+  wind_dir_jitter_deg: 15.0
+  wind_speed_jitter: 0.2
+  worldcover_dir: south africa data/worldcover
