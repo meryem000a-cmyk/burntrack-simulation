@@ -38,5 +38,5 @@ scenarios:
   wind_speed_jitter: 0.20
   wind_dir_jitter_deg: 15.0
   moisture_jitter: 0.02
-  fused_burned_raster: south africa data/knysna_2017/burned_area_35x35_0.10.tif
+  fused_burned_raster: south africa data/knysna_2017/burned_area_35x35_0.05.tif
   ignition_override_cell: [4, 2]
