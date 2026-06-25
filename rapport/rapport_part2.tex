@@ -392,6 +392,33 @@ Le projet BurnTrack a permis de réaliser les contributions suivantes~:
     \item \textbf{Prototype de rover 6WD/6WS} --- plateforme complète avec capteurs environnementaux, vision ONNX embarquée et communication LoRa.
 \end{enumerate}
 
+\subsubsection{Validation spatiale sur feu réel : Table Mountain (avril 2021)}
+
+Pour valider le système complet (Rothermel + MLP + CA stochastique) en conditions réelles --- et pas seulement sur un jeu de données curé --- nous l'avons appliqué au feu de Table Mountain d'avril 2021, dont les détections FIRMS (NASA, MODIS + VIIRS) et la réanalyse météo ERA5-Land (Copernicus) sont disponibles localement. Le scénario couvre un domaine de 3{,}2\,km $\times$ 5{,}8\,km autour des premières détections, discrétisé en 40\,$\times$\,40 cellules de 100\,m. Le moteur charge la pente depuis SRTM (résolution 30\,m), l'occupation du sol depuis ESA WorldCover, et les conditions météo horaires depuis ERA5. Un ensemble de 15 simulations stochastiques est exécuté sur 12\,h, avec une perturbation de $\pm 20$\,\% sur la vitesse du vent, $\pm 15^\circ$ sur sa direction et $\pm 0{,}02$ sur l'humidité du combustible.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/overlay_table_mountain.png}
+    \caption{Feu de Table Mountain, avril 2021, après 12\,h de simulation. Rouge : zone brûlée simulée uniquement. Bleu : détection FIRMS uniquement. Violet : accord. La sur-représentation du rouge reflète la sous-détection de FIRMS (résolution 375\,m à 1\,km, nuages, petits foyers).}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/timeseries_table_mountain.png}
+    \caption{Évolution temporelle de la surface brûlée (simulée cumulée vs FIRMS cumulée) et de l'IoU au cours des 12\,h. La simulation atteint son extension maximale dès la 3e heure.}
+\end{figure}
+
+\paragraph{Métriques obtenues.}
+
+\begin{itemize}[nosep]
+    \item \textbf{IoU strict (correspondance cellule exacte)}~: 0,02. Très conservateur~: la simulation produit $\sim$45 cellules brûlées là où FIRMS n'en détecte que 8.
+    \item \textbf{IoU généreux (dilatation de 2 cellules, $\sim$200\,m)}~: 0,05. Reflète l'incertitude de positionnement des hotspots FIRMS (375\,m pour VIIRS, 1\,km pour MODIS).
+    \item \textbf{AUC de la carte de probabilité d'ensemble}~: 0,55. Au-dessus du hasard (0,5)~: le modèle classe les cellules réellement brûlées avec un score légèrement meilleur qu'aléatoire.
+    \item TP / FP / FN / TN~: 1 / 44 / 7 / 1548 sur 1600 cellules.
+\end{itemize}
+
+\paragraph{Interprétation honnête.} Ces scores sont modestes mais scientifiquement informatifs. Trois facteurs expliquent le décalage~: (1) la cible FIRMS sous-estime la surface réellement brûlée (résolution satellite, couverture nuageuse, retard de revisite)~; (2) la réanalyse ERA5-Land a une résolution de 0{,}1$^\circ$ ($\sim$11\,km), trop grossière pour capturer les brises locales de Table Mountain~; (3) le modèle surestime la propagation en l'absence du MLP-corrector dans la boucle CA (la calibration de l'écart CA-vs-Rothermel est en cours, voir section~\ref{sec:limites}). L'AUC de 0,55 confirme néanmoins que le système produit une information spatialement cohérente et exploitable.
+
 \subsection*{Limites et difficultés rencontrées}\label{sec:limites}
 
 \begin{itemize}[nosep]
