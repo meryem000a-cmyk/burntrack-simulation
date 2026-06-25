@@ -370,100 +370,116 @@ def score_auc(prob_grid, real_burned):
 # SIMULATION
 # =====================================================================
 
+def _single_run(args):
+    """Run a single ensemble member. Module-level for multiprocessing pickling."""
+    run_idx, n_hours, n_rows, n_cols, fuel_grid, slope_pct, aspect_deg, elevation_m, \
+        ws_series, wd_series, m1h_series, rh_series, tc_series, \
+        cell_size_m, dt_min, steps_per_hour, ign_r, ign_c, seed = args
+
+    ws, wd, m1h, rh, tc = ws_series[0], wd_series[0], m1h_series[0], rh_series[0], tc_series[0]
+    wind_grid = np.full((n_rows, n_cols), ws, dtype=np.float32)
+    wind_dir_grid = np.full((n_rows, n_cols), wd, dtype=np.float32)
+    moist_grid = np.full((n_rows, n_cols), m1h, dtype=np.float32)
+    rh_grid = np.full((n_rows, n_cols), rh, dtype=np.float32)
+    temp_grid = np.full((n_rows, n_cols), tc, dtype=np.float32)
+
+    grid = Grid.from_arrays(
+        fuel_codes=fuel_grid,
+        slope_pct=slope_pct,
+        aspect_deg=aspect_deg,
+        elevation_m=elevation_m,
+        wind_speed=wind_grid,
+        wind_dir=wind_dir_grid,
+        moisture_1h=moist_grid,
+        cell_size=cell_size_m,
+        rh_percent=rh_grid,
+        temp_c=temp_grid,
+    )
+    rules = PropagationRules(stochastic=True, use_corrector=False)
+    sim = FireSimulation(grid, rules, seed=seed)
+    sim.ignite(ign_r, ign_c)
+
+    ensemble = np.zeros((n_hours + 1, n_rows, n_cols), dtype=bool)
+    ensemble[0] = (grid.state_array() == int(CellState.BURNED)) | (grid.state_array() == int(CellState.BURNING))
+
+    for h in range(1, n_hours + 1):
+        ws_h, wd_h, m1h_h, rh_h, tc_h = ws_series[h], wd_series[h], m1h_series[h], rh_series[h], tc_series[h]
+        new_moist = MoistureInputs(
+            m_1h=m1h_h, m_10h=m1h_h + 0.01, m_100h=m1h_h + 0.02,
+            m_live_herb=min(m1h_h * 6, 1.0),
+            m_live_woody=min(m1h_h * 8, 1.0),
+        )
+        for i in range(n_rows):
+            for j in range(n_cols):
+                c = grid.cells[i][j]
+                if c.state in (CellState.BURNING, CellState.BURNED):
+                    c.wind_speed_ms = ws_h
+                    c.wind_dir_deg = wd_h
+                    c.moisture = new_moist
+                    c.rh_percent = rh_h
+                    c.temp_c = tc_h
+
+        for _ in range(steps_per_hour):
+            sim.step(dt_min)
+            if grid.burning_count() == 0:
+                break
+
+        ensemble[h] = (grid.state_array() == int(CellState.BURNED)) | (grid.state_array() == int(CellState.BURNING))
+
+    return run_idx, ensemble
+
+
 def run_ensemble(grid_template, fuel_grid, weather_per_hour, scenario, out_dir):
-    """Run n_ensemble stochastic simulations. Returns ensemble_burned[hour][run] = 2D bool."""
+    """Run n_ensemble stochastic simulations in parallel across CPU cores.
+    Returns ensemble_burned[hour][run] = 2D bool."""
+    import os
+    import concurrent.futures
+    nproc = max(1, (os.cpu_count() or 4) - 1)
+    print(f"  Using {nproc} worker processes (of {os.cpu_count()} CPUs available)")
+
     rng = np.random.default_rng(scenario["seed"])
     n_rows, n_cols = fuel_grid.shape
     n_hours = scenario["duration_h"]
     n_ens = scenario["n_ensemble"]
     dt = scenario["dt_min"]
     steps_per_hour = int(60.0 / dt)
+    ws_j = scenario["wind_speed_jitter"]
+    wd_j = scenario["wind_dir_jitter_deg"]
+    m_j = scenario["moisture_jitter"]
 
-    ensemble = np.zeros((n_hours + 1, n_ens, n_rows, n_cols), dtype=bool)
-
+    # Build per-run args (each ensemble run has its own weather jitter and seed)
+    run_args = []
     for run_idx in range(n_ens):
-        ws_j = scenario["wind_speed_jitter"]
-        wd_j = scenario["wind_dir_jitter_deg"]
-        m_j = scenario["moisture_jitter"]
-
-        # Per-run perturbed weather time series (one perturbation per hour, fixed across the run)
-        ws_series = []
-        wd_series = []
-        m1h_series = []
-        rh_series = []
-        tc_series = []
+        ws_series, wd_series, m1h_series, rh_series, tc_series = [], [], [], [], []
         for h in range(n_hours + 1):
             base = weather_per_hour.get(h, weather_per_hour.get(0))
             ws = float(np.clip(base["wind_speed"] * (1.0 + rng.normal(0, ws_j)), 0.1, 30.0))
             wd = float((base["wind_dir"] + rng.normal(0, wd_j)) % 360)
             rh = float(np.clip(base["rh_percent"] + rng.normal(0, 5.0), 1.0, 99.0))
             tc = float(base["temp_c"] + rng.normal(0, 1.0))
-            # use the m1h from the weather builder if present, else derive from rh
             m1h_base = base.get("m1h", rh / 150.0)
             m1h = float(np.clip(m1h_base + rng.normal(0, m_j), 0.02, 0.30))
-            ws_series.append(ws)
-            wd_series.append(wd)
-            m1h_series.append(m1h)
-            rh_series.append(rh)
-            tc_series.append(tc)
-
-        # Build the grid ONCE per run, with hour-0 weather. We then update per-cell
-        # weather each hour to mimic evolving conditions.
-        ws, wd, m1h, rh, tc = ws_series[0], wd_series[0], m1h_series[0], rh_series[0], tc_series[0]
-        wind_grid = np.full((n_rows, n_cols), ws, dtype=np.float32)
-        wind_dir_grid = np.full((n_rows, n_cols), wd, dtype=np.float32)
-        moist_grid = np.full((n_rows, n_cols), m1h, dtype=np.float32)
-        rh_grid = np.full((n_rows, n_cols), rh, dtype=np.float32)
-        temp_grid = np.full((n_rows, n_cols), tc, dtype=np.float32)
-
-        grid = Grid.from_arrays(
-            fuel_codes=fuel_grid,
-            slope_pct=grid_template["slope_pct"],
-            aspect_deg=grid_template["aspect_deg"],
-            elevation_m=grid_template["elevation_m"],
-            wind_speed=wind_grid,
-            wind_dir=wind_dir_grid,
-            moisture_1h=moist_grid,
-            cell_size=scenario["cell_size_m"],
-            rh_percent=rh_grid,
-            temp_c=temp_grid,
-        )
+            ws_series.append(ws); wd_series.append(wd); m1h_series.append(m1h)
+            rh_series.append(rh); tc_series.append(tc)
         ign_r, ign_c = scenario["ignition_cell"]
-        rules = PropagationRules(stochastic=True, use_corrector=False)
-        sim = FireSimulation(grid, rules, seed=int(rng.integers(1, 1_000_000)))
-        sim.ignite(ign_r, ign_c)
+        seed = int(rng.integers(1, 1_000_000))
+        run_args.append((
+            run_idx, n_hours, n_rows, n_cols, fuel_grid,
+            grid_template["slope_pct"], grid_template["aspect_deg"], grid_template["elevation_m"],
+            ws_series, wd_series, m1h_series, rh_series, tc_series,
+            scenario["cell_size_m"], dt, steps_per_hour, ign_r, ign_c, seed,
+        ))
 
-        # Snapshot at hour 0
-        ensemble[0, run_idx] = (grid.state_array() == int(CellState.BURNED)) | (grid.state_array() == int(CellState.BURNING))
-
-        for h in range(1, n_hours + 1):
-            # update per-cell weather for the new hour (only burning/burned cells,
-            # since rules read from the source cell)
-            ws_h, wd_h, m1h_h, rh_h, tc_h = ws_series[h], wd_series[h], m1h_series[h], rh_series[h], tc_series[h]
-            new_moist = MoistureInputs(
-                m_1h=m1h_h, m_10h=m1h_h + 0.01, m_100h=m1h_h + 0.02,
-                m_live_herb=min(m1h_h * 6, 1.0),
-                m_live_woody=min(m1h_h * 8, 1.0),
-            )
-            for i in range(n_rows):
-                for j in range(n_cols):
-                    c = grid.cells[i][j]
-                    if c.state in (CellState.BURNING, CellState.BURNED):
-                        c.wind_speed_ms = ws_h
-                        c.wind_dir_deg = wd_h
-                        c.moisture = new_moist
-                        c.rh_percent = rh_h
-                        c.temp_c = tc_h
-
-            for _ in range(steps_per_hour):
-                sim.step(dt)
-                if grid.burning_count() == 0:
-                    break
-
-            ensemble[h, run_idx] = (grid.state_array() == int(CellState.BURNED)) | (grid.state_array() == int(CellState.BURNING))
-
-        if (run_idx + 1) % 5 == 0 or run_idx == 0:
-            print(f"  ensemble run {run_idx + 1}/{n_ens} done")
+    ensemble = np.zeros((n_hours + 1, n_ens, n_rows, n_cols), dtype=bool)
+    completed = 0
+    with concurrent.futures.ProcessPoolExecutor(max_workers=nproc) as executor:
+        futures = {executor.submit(_single_run, a): a[0] for a in run_args}
+        for fut in concurrent.futures.as_completed(futures):
+            run_idx, result = fut.result()
+            ensemble[:, run_idx] = result
+            completed += 1
+            if completed % 5 == 0 or completed == n_ens:
+                print(f"  ensemble run {completed}/{n_ens} done")
 
     return ensemble
 
@@ -721,6 +737,8 @@ def run_scenario(scenario, out_root):
     final_metrics = score_burned(sim_final, real_final)
     final_metrics["AUC"] = auc
     final_metrics["hour"] = final_h
+    # Save sim mask for fast threshold sweep
+    np.save(str(out_dir / "sim_final.npy"), sim_final)
 
     # figures
     make_overlay(sim_final, real_final, bbox_lat, bbox_lon, out_dir / "overlay_final.png", f"t+{final_h}h")
