@@ -581,14 +581,29 @@ def run_scenario(scenario, out_root):
     print("\n[1/6] Loading FIRMS detections...")
     firms = load_firms(PROJECT_ROOT / scenario["firms_csv"], bbox_lat, bbox_lon)
     if len(firms) == 0:
-        raise MissingDataError(f"No FIRMS detections in bbox lat={bbox_lat} lon={bbox_lon} from {scenario['firms_csv']}")
-    print(f"  {len(firms)} detections, {firms.datetime.min()} -> {firms.datetime.max()}")
+        # Fall back to the Landsat-derived ignition if provided, or the bbox centroid
+        if "ignition_override_cell" in scenario:
+            ign_row, ign_col = scenario["ignition_override_cell"]
+            print(f"  No FIRMS detections; using scenario ignition_override_cell: row={ign_row} col={ign_col}")
+        else:
+            ign_row, ign_col = n_rows // 2, n_cols // 2
+            print(f"  No FIRMS detections; using bbox centroid as ignition: row={ign_row} col={ign_col}")
+        scenario["ignition_cell"] = (ign_row, ign_col)
+        # Build a single synthetic FIRMS row at the ignition point so downstream code still works
+        ign_lon = bbox_lon[0] + (ign_col + 0.5) * (bbox_lon[1] - bbox_lon[0]) / n_cols
+        ign_lat = bbox_lat[1] - (ign_row + 0.5) * (bbox_lat[1] - bbox_lat[0]) / n_rows
+        firms = pd.DataFrame([{
+            "datetime": pd.Timestamp(scenario.get("start_time", "2024-01-01T00:00")),
+            "latitude": ign_lat, "longitude": ign_lon, "confidence": "h",
+        }])
+    else:
+        print(f"  {len(firms)} detections, {firms.datetime.min()} -> {firms.datetime.max()}")
 
-    # pick the earliest detection as ignition point
-    first = firms.sort_values("datetime").iloc[0]
-    ign_row, ign_col = latlon_to_rowcol(first.latitude, first.longitude, bbox_lat, bbox_lon, n_rows, n_cols)
-    print(f"  Ignition: row={ign_row} col={ign_col} (lat={first.latitude:.4f} lon={first.longitude:.4f})")
-    scenario["ignition_cell"] = (ign_row, ign_col)
+        # pick the earliest detection as ignition point
+        first = firms.sort_values("datetime").iloc[0]
+        ign_row, ign_col = latlon_to_rowcol(first.latitude, first.longitude, bbox_lat, bbox_lon, n_rows, n_cols)
+        print(f"  Ignition: row={ign_row} col={ign_col} (lat={first.latitude:.4f} lon={first.longitude:.4f})")
+        scenario["ignition_cell"] = (ign_row, ign_col)
 
     # build per-hour real burned mask (cumulative)
     target_hours = list(range(n_hours + 1))
