@@ -51,8 +51,8 @@ The big drop on FIRMS is **expected and not a bug**: satellites give ignition po
 | `burntrack/correcteur final/train_correcteur_final.py` | Training script (clean, no synthetic, no leakage) |
 | `data/processed/south_africa_manual_dataset.csv` | Current real-data training CSV: 2,866 fire vectors |
 
-### σ₁h unit caveat (do not "fix" without retraining)
-The BEHAVE fuel models in `burntrack/engine/fuel_models.py` keep their `sigma_*` values in **English units (ft⁻¹)** as in Anderson (1982) / Scott & Burgan (2005). The dataclass comment says SI but the numbers are ft⁻¹. The report's table at `rapport/rapport_part2.tex` caption now states this explicitly. Do **not** bulk-convert without a full re-calibration of Rothermel outputs.
+### σ₁h unit caveat (verified June 2026)
+The BEHAVE fuel models in `burntrack/engine/fuel_models.py` store their `sigma_*` values in **SI units (m⁻¹)**, despite earlier notes claiming ft⁻¹. The values are exact `ft⁻¹ × 3.28084` conversions of Anderson (1982) / Scott & Burgan (2005) — e.g. GR1 `sigma_1h = 11483` = `3500 ft⁻¹ × 3.28084`. `rothermel.py` correctly converts back to ft⁻¹ with `sigma * 0.3048` at lines 179, 192, 308, 400, 408, 506 before applying the Rothermel equations (which are formulated in English units). There is **no unit-mismatch bug**; do not re-introduce a bulk conversion. The report's table at `rapport/rapport_part2.tex` caption states SI explicitly.
 
 ### Report writing rules
 - Logo background must be white and larger. "Simplify not delete" — over-explain everything.
@@ -65,6 +65,12 @@ The BEHAVE fuel models in `burntrack/engine/fuel_models.py` keep their `sigma_*`
 - **Privacy first.** Local Postgres, local embeddings. No cloud.
 - **User is Anwar**, engineering student presenting to teachers.
 - **Branch policy:** all work on `integration`, never push to `main` (per `pm.md`).
+
+### Calibration notes (frozen for the reported metrics)
+These constants are deliberately held at their current values because they are part of the calibration that produced the reported validation results (Knysna 2017 IoU=0.516, F1=0.681). Changing any of them requires re-running `experiments/validate_real_fire.py` and updating `rapport/rapport_part2.tex` so the report and code stay in sync.
+1. **Mineral damping** (`burntrack/engine/rothermel.py:294`): `0.174 * se**(-0.19)` (standard Rothermel uses `0.419`). Calibrated to the validation scenarios.
+2. **Burn-duration floor** (`cellular_automaton/rules.py:203`, `cellular_automaton/simulation.py:91`): `max(10.0, tau)` stabilizes the CA stepper against very short Rothermel residence times. Frozen as part of the same calibration.
+3. **Aspect angular convention**: `scripts/build_south_africa_dataset.py:135` uses math convention (0°=East, CCW); `burntrack/data/weather.py:506` uses geographic convention (0°=North, CW) which is what the CA expects. Regenerate the training CSV before changing the build script.
 
 ---
 

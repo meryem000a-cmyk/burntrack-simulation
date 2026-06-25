@@ -88,6 +88,9 @@ class FireSimulation:
             # Durée de combustion via le temps de résidence Rothermel (tau)
             out = self.rules.compute_cell_ros(c, self.grid)
             tau = getattr(out, 'tau', None) or getattr(out, 'residence_time', None)
+            # Burn duration from Rothermel residence time (tau), floored to 10 min
+            # for numerical stability of the CA stepper. Frozen calibration —
+            # re-run validation before changing.
             c.burn_duration = max(10.0, float(tau)) if tau else 15.0
 
     def ignite_multiple(self, points: List[Tuple[int, int]]):
@@ -183,10 +186,26 @@ class FireSimulation:
         return self.grid.state_array().copy()
 
     def reset(self):
-        """Remet toutes les cellules à UNBURNED et réinitialise les compteurs."""
+        """
+        Remet toutes les cellules à UNBURNED et réinitialise les compteurs.
+
+        Préserve la configuration statique (fuel, pente, aspect, altitude, vent,
+        humidité, température) et les coupe-feu (FIREBREAK). Ne réinitialise que
+        l'état dynamique lié à une exécution — sans cela une seconde simulation
+        porterait des ignition_time/burn_elapsed/ignition_buffer/delta_ros obsolètes
+        de la run précédente (les cellules s'enflamment quasi-immédiatement et la
+        correction IA est périmée).
+        """
         for i in range(self.grid.rows):
             for j in range(self.grid.cols):
                 c = self.grid.cells[i][j]
                 if c.state != CellState.FIREBREAK:
                     c.state = CellState.UNBURNED
+                # Compteurs dynamiques — toujours remis à zéro (même sur FIREBREAK,
+                # par cohérence si le statut coupe-feu change plus tard).
+                c.ignition_time = None
+                c.burn_elapsed = 0.0
+                c.burn_duration = 10.0  # valeur par défaut, recalculée à l'ignition
+                c.ignition_buffer = 0.0
+                c.delta_ros = 0.0
         

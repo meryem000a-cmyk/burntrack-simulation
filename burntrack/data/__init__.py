@@ -1,12 +1,14 @@
 """
-burntrack.data — Data acquisition and synthetic generation pipeline.
+burntrack.data — Data acquisition pipeline.
 
 Provides:
     - FIRMS active fire download (NASA VIIRS)
     - Weather download (Open-Meteo + ERA5 CDS)
     - Slope/aspect computation from elevation grids
-    - Synthetic dataset generation (literature-calibrated + Rothermel engine)
     - Real dataset pipeline for African fire propagation
+
+NOTE: The synthetic dataset generator was removed on 2026-06-25 (NO-synthetic-data
+constraint, see ReadIfAgent.md). All training now uses real observations only.
 
 Convenience aliases:
     download_weather  -> download_openmeteo
@@ -32,16 +34,6 @@ from .firms import (
     AFRICA_REGIONS,
     MAX_DISTANCE_M,
     MAX_TIME_DIFF_MIN,
-)
-
-from .synthetic import (
-    SyntheticConfig,
-    AFRICA_CLIMATE_ZONES,
-    BIAS_PROFILES,
-    FUEL_MODEL_ENCODING,
-    generate_synthetic_dataset,
-    generate_sample,
-    generate_train_val_test_split,
 )
 
 from .real_dataset import (
@@ -78,14 +70,6 @@ __all__ = [
     "AFRICA_REGIONS",
     "MAX_DISTANCE_M",
     "MAX_TIME_DIFF_MIN",
-    # Synthetic
-    "SyntheticConfig",
-    "AFRICA_CLIMATE_ZONES",
-    "BIAS_PROFILES",
-    "FUEL_MODEL_ENCODING",
-    "generate_synthetic_dataset",
-    "generate_sample",
-    "generate_train_val_test_split",
     # Real dataset
     "build_real_dataset",
     "compute_rothermel_baseline",

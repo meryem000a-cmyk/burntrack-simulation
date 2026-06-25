@@ -171,9 +171,25 @@ class TestCellularAutomaton:
 
 # ── 4. Pipeline End-to-End ───────────────────────────────────────────
 
+# scripts/run_pipeline.py was archived on 2026-06-25 (see RESTRUCTURING.md);
+# the legacy PipelineRunner depends on the deprecated RF corrector and the
+# gitignored models/ directory. These tests are skipped rather than deleted.
+try:
+    from scripts.run_pipeline import PipelineRunner
+    _PIPELINE_AVAILABLE = True
+except ImportError:
+    _PIPELINE_AVAILABLE = False
+
+_pipeline_skip = pytest.mark.skipif(
+    not _PIPELINE_AVAILABLE,
+    reason="scripts.run_pipeline archived (RESTRUCTURING.md); legacy RF pipeline unavailable",
+)
+
+
 class TestPipelineEndToEnd:
     def setup_method(self):
-        from scripts.run_pipeline import PipelineRunner
+        if not _PIPELINE_AVAILABLE:
+            pytest.skip("scripts.run_pipeline not available")
         self.runner = PipelineRunner(model_dir=os.path.join(PROJECT_ROOT, "models"))
 
     def test_pipeline_returns_dict(self):
@@ -214,7 +230,8 @@ class TestPipelineEndToEnd:
 
 class TestPipelineCAIntegration:
     def setup_method(self):
-        from scripts.run_pipeline import PipelineRunner
+        if not _PIPELINE_AVAILABLE:
+            pytest.skip("scripts.run_pipeline not available")
         from cellular_automaton.grid import Grid
         from cellular_automaton.simulation import FireSimulation
         self.PipelineRunner = PipelineRunner

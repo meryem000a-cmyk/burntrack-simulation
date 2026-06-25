@@ -265,6 +265,9 @@ experiments/out/
 *.toc
 *.log
 *.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
 
 # Old/stale figures folder (the real ones live in rapport/figures/)
 /figures/

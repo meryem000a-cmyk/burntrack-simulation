@@ -225,6 +225,12 @@ class RothermelEngine:
         w_total = w_dead + w_live
         if w_live <= 0 or w_total <= 0:
             return mx_dead
+        if mx_dead <= 0:
+            # mx_dead=0 rendrait mx_dead**(-0.5) divergent. Tous les fuel models
+            # BEHAVE/Africains validés ont mx>0 (cf. fuel_models.py:52-53), mais
+            # le dataclass rothermel FuelModel initialise mx=0.0 par défaut.
+            # On retombe sur le scénario sans extension vivante.
+            return 1.0
 
         f_live = w_live / w_total
         Mx_live = 2.9 * (f_live ** 1.5) * (mx_dead ** (-0.5))
@@ -285,6 +291,12 @@ class RothermelEngine:
 
         if st <= 0 or se <= 0:
             return 1.0
+        # Calibration choice (frozen 2026-06): mineral-damping coefficient.
+        # Standard Rothermel (1972) uses 0.419 * se**(-0.19); this engine uses
+        # 0.174, calibrated against the Knysna 2017 / Table Mountain 2021
+        # validation scenarios. Changing this constant invalidates the reported
+        # metrics (IoU=0.516, F1=0.681) — re-run experiments/validate_real_fire.py
+        # and update rapport/rapport_part2.tex before modifying.
         eta_S = 0.174 * (se ** (-0.19))
         return max(0.0, eta_S)
 

@@ -36,7 +36,7 @@ from burntrack.engine.fuel_models import ALL_FUEL_MODELS
 class SimulationServer:
     """Serveur WebSocket gerant les simulations CA en temps reel."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8765):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8765):
         self.host = host
         self.port = port
         self.grid: Optional[Grid] = None
@@ -943,7 +943,7 @@ class SimulationServer:
 
 def main():
     parser = argparse.ArgumentParser(description="BurnTrack WebSocket Visualization Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1; use 0.0.0.0 to expose on LAN)")
     parser.add_argument("--port", type=int, default=8765, help="Port to listen on (default: 8765)")
     args = parser.parse_args()
 

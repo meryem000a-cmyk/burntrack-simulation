@@ -200,6 +200,11 @@ class PropagationRules:
                 # Calcul de sa propre durée de combustion via le temps de résidence Rothermel (tau)
                 out = self.compute_cell_ros(cell, grid)
                 tau = getattr(out, 'tau', None) or getattr(out, 'residence_time', None)
+                # Burn duration from Rothermel residence time (tau), floored to
+                # 10 min for numerical stability of the CA stepper. Frozen as part
+                # of the calibration tied to the reported validation metrics
+                # (Knysna 2017 IoU=0.516); re-run experiments/validate_real_fire.py
+                # before changing.
                 cell.burn_duration = max(10.0, float(tau)) if tau else 15.0
 
         return all_new_ignitions

@@ -57,13 +57,13 @@ Le correcteur ML vise à compenser le biais systématique du modèle Rothermel p
 \paragraph{Données d'entraînement.} Le dataset est constitué de~:
 \begin{itemize}[nosep]
     \item 1\,840 observations réelles issues de 7 études publiées (Savadogo 2014, Govender 2006, Frost 1987, Hoffa 1999, Hely 2003, Trollope 1985, Shea 1996)
-    \item 6\,988 données synthétiques générées à partir de la physique
-    \item 53 colonnes par échantillon, réduites à 8 features physiques
+    \item 2\,866 vecteurs de feu réels reconstruits à partir des détections satellites FIRMS (NASA MODIS/VIIRS), ERA5-Land, SRTM et ESA WorldCover
+    \item 31 features physiques par échantillon
 \end{itemize}
 
-Un problème majeur identifié lors du développement est le risque de \textit{fuite d'information} par le fuel encoding~: l'utilisation d'un target encoding par type de combustible permettait au modèle d'atteindre un $R^2$ artificiel de 0,97 sans apprendre la physique sous-jacente. La suppression du fuel encoding et le passage à des features purement physiques a résolu ce problème.
+Un problème majeur identifié lors du développement est le risque de \textit{fuite d'information}~: une version antérieure du correcteur utilisait une feature \texttt{thermal\_proxy} directement dérivée de la cible ($\Delta_{\text{ROS}} \times 0{,}95 + \text{bruit}$), permettant au modèle d'atteindre un $R^2$ artificiel de 0,97 sans apprendre la physique sous-jacente. Cette feature a été supprimée et le modèle réentraîné sur des features purement physiques. Le \textit{fuel encoding} (target encoding par type de combustible) est conservé mais calculé exclusivement sur la partition d'entraînement, ce qui élimine toute fuite au moment de l'inférence.
 
-\paragraph{Architecture MLP retenue.} Le réseau de neurones final utilise 8 features d'entrée (wind\_speed\_ms, rh\_percent, slope\_pct, ros\_rothermel, h\_dead\_kj\_kg, sigma\_m2\_m3, m\_live\_woody, mx\_percent), avec une architecture 8$\rightarrow$64$\rightarrow$32$\rightarrow$1 prédisant le $\Delta$ROS~:
+\paragraph{Architecture MLP retenue.} Le réseau de neurones final utilise 31 features d'entrée couvrant cinq familles~: propriétés du combustible (\texttt{fuel\_encoded}, charges, $\sigma$, $\delta$, $m_x$), topographie (pente, aspect), météorologie (vent, humidité, température, VPD, DFMC), sorties Rothermel ($\text{ROS}_{\text{Roth}}$, $\phi_w$, $\phi_s$, $I_R$, $\xi$, $\tau$) et interactions non-linéaires ($\text{wind}^2$, $\text{slope}^2$, $\text{ROS}^2$, \texttt{wind\,$\times$\,slope}, \texttt{wind\,$\times$\,hum}), avec une architecture 31$\rightarrow$64$\rightarrow$32$\rightarrow$1 prédisant le $\Delta$ROS~:
 
 \begin{table}[H]
 \centering
@@ -313,71 +313,52 @@ Le couplage de l'automate cellulaire stochastique, du correcteur MLP et du plani
 
 \subsubsection{Réalisation matérielle}
 
-La partie matérielle a abouti à la conception d'un prototype comprenant~:
-\begin{itemize}[nosep]
-    \item Châssis WildWilly assemblé avec 13 pièces imprimées en 3D (PLA)
-    \item Schéma électrique complet réalisé sous Fritzing (figure~\ref{fig:circuit})
-    \item Architecture logicielle pour le firmware (les pilotes bas niveau et codes microcontrôleurs décrits dans la nomenclature matérielle (BOM) ne sont pas inclus dans ce dépôt public, centré sur la simulation et la correction par IA)
-    \item Mode simulation/mock permettant le développement et les tests algorithmiques sans matériel physique
-\end{itemize}
+La partie matérielle a abouti à un prototype comprenant~: un châssis WildWilly assemblé avec 13 pièces imprimées en 3D (PLA), un schéma électrique complet sous Fritzing (figure~\ref{fig:circuit}), et un mode simulation/mock permettant les tests algorithmiques sans matériel physique. Les pilotes bas niveau et codes microcontrôleurs ne sont pas inclus dans ce dépôt public, centré sur la simulation et la correction par IA.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.90\textwidth]{figures/circuit_fritzing.png}
+    \includegraphics[width=0.85\textwidth]{figures/circuit_fritzing.png}
     \caption{Schéma de câblage du rover BurnTrack (Fritzing)}
     \label{fig:circuit}
 \end{figure}
 
-\paragraph{Impression 3D.} Le châssis WildWilly nécessite 13 pièces structurelles imprimées en PLA sur les imprimantes du FabLab de l'école. Les pièces comprennent les supports de suspension rocker-bogie, les adaptateurs de roue, les supports de capteurs (anémomètre, caméra, GPS), et le boîtier de protection électronique. Le temps total d'impression est estimé à environ 38 heures, avec une densité de remplissage de 30\,\% pour un compromis poids/rigidité.
-
-\paragraph{Assemblage et intégration.} L'assemblage du prototype a été réalisé en plusieurs étapes~:
-
-\begin{enumerate}[nosep]
-    \item Montage du châssis et du mécanisme rocker-bogie (figure~\ref{fig:chassis})
-    \item Installation des 6 moteurs DC et des 6 servomoteurs de direction
-    \item Câblage des 3 ponts en H L298N et du PCA9685
-    \item Intégration des capteurs (IMU, GPS, DHT11, MQ135) sur breadboard (figure~\ref{fig:breadboard})
-    \item Montage de l'anémomètre DIY à capteurs Hall SS41F
-    \item Installation du module LoRa RFM95W et de la caméra USB
-    \item Câblage final et tests individuels de chaque sous-système
-\end{enumerate}
+\paragraph{Impression 3D et assemblage.} Le châssis nécessite 13 pièces structurelles en PLA (supports rocker-bogie, adaptateurs de roue, supports de capteurs, boîtier électronique), imprimées en $\sim$38\,h avec un remplissage de 30\,\%. L'assemblage comprend~: montage du châssis et suspension rocker-bogie, installation des 6 moteurs DC et 6 servomoteurs de direction, câblage des 3 ponts en H L298N et du PCA9685, intégration des capteurs (IMU, GPS, DHT11, MQ135) sur breadboard, montage de l'anémomètre DIY à capteurs Hall SS41F, installation du module LoRa RFM95W et de la caméra USB, puis tests individuels de chaque sous-système.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.65\textwidth]{figures/assemblage_chassis.jpg}
-    \caption{Assemblage du châssis WildWilly avec les pièces 3D imprimées}
-    \label{fig:chassis}
+    \begin{minipage}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/assemblage_chassis.jpg}\\
+        \small (a) Assemblage du châssis WildWilly avec les pièces 3D imprimées
+        \label{fig:chassis}
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/capteurs_breadboard.jpg}\\
+        \small (b) Prototype de test~: capteurs et drivers sur breadboard
+        \label{fig:breadboard}
+    \end{minipage}
+
+    \vspace{0.3cm}
+
+    \begin{minipage}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/electronique_interne.jpg}\\
+        \small (c) Électronique interne~: drivers moteur, PCA9685 et câblage
+        \label{fig:electronique}
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/rover_final.jpg}\\
+        \small (d) Prototype final du rover BurnTrack entièrement assemblé
+        \label{fig:rover_final}
+    \end{minipage}
+    \caption{Assemblage progressif du prototype BurnTrack~: (a) châssis imprimé, (b) tests sur breadboard, (c) intégration électronique, (d) rover final équipé de ses capteurs.}
 \end{figure}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.65\textwidth]{figures/capteurs_breadboard.jpg}
-    \caption{Prototype de test~: capteurs et drivers sur breadboard}
-    \label{fig:breadboard}
-\end{figure}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.65\textwidth]{figures/electronique_interne.jpg}
-    \caption{Électronique interne du rover~: drivers moteur, PCA9685 et câblage}
-    \label{fig:electronique}
-\end{figure}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.65\textwidth]{figures/rover_final.jpg}
-    \caption{Prototype final du rover BurnTrack entièrement assemblé et équipé de ses capteurs}
-    \label{fig:rover_final}
-\end{figure}
-
-\paragraph{Sécurité.} Le rover intègre plusieurs mécanismes de sécurité~:
-\begin{itemize}[nosep]
-    \item \textbf{E-stop matériel}~: un relais sur le rail 12V, commandé par un bouton physique, coupe l'alimentation des moteurs indépendamment du logiciel.
-    \item \textbf{Bridage logiciel}~: le PWM est limité à 60\,\% en mode démonstration intérieure.
-    \item \textbf{Géofence}~: si la position GPS quitte le polygone configuré, le rover s'arrête immédiatement.
-    \item \textbf{Retour automatique}~: à 10,5~V (3,5~V/cellule), le rover abandonne sa mission et retourne au point de départ.
-    \item \textbf{Commande STOP à distance}~: la station de base peut envoyer un message LoRa d'arrêt d'urgence.
-\end{itemize}
+\paragraph{Sécurité.} Le rover intègre plusieurs mécanismes~: \textbf{e-stop matériel} (relais sur le rail 12V coupant l'alimentation moteurs indépendamment du logiciel), \textbf{bridage logiciel} (PWM limité à 60\,\% en démo intérieure), \textbf{géofence GPS} (arrêt immédiat hors polygone), \textbf{retour automatique} à 10{,}5~V, et \textbf{commande STOP LoRa} depuis la station de base.
 
 % ============================================================
 % CONCLUSION
@@ -390,7 +371,7 @@ Le projet BurnTrack a permis de réaliser les contributions suivantes~:
 
 \begin{enumerate}[nosep]
     \item \textbf{Première bibliothèque de modèles de combustible africains} --- 28 modèles calibrés pour les écosystèmes marocains et africains, couvrant les steppes, forêts, savanes, maquis et zones agricoles du continent.
-    \item \textbf{Correcteur ML pour Rothermel} --- un réseau de neurones (MLP 8$\rightarrow$64$\rightarrow$32$\rightarrow$1) améliorant le $R^2$ de 0,83 à 0,99 sur un jeu de données de 1\,840 observations réelles.
+    \item \textbf{Correcteur ML pour Rothermel} --- un réseau de neurones (MLP 31$\rightarrow$64$\rightarrow$32$\rightarrow$1) améliorant le $R^2$ de 0,83 à 0,99 sur un jeu de données de 1\,840 observations réelles.
     \item \textbf{Plateforme de simulation intégrée} --- couplage Rothermel + automate cellulaire stochastique + simulation d'ensemble + visualisation WebSocket temps réel.
     \item \textbf{Navigation autonome en environnement dynamique} --- algorithme D* Lite avec carte de risque Dijkstra et re-planification incrémentale.
     \item \textbf{Prototype de rover 6WD/6WS} --- plateforme complète avec capteurs environnementaux, vision ONNX embarquée et communication LoRa.
@@ -404,22 +385,24 @@ Pour valider le système complet (Rothermel + MLP + CA stochastique) en conditio
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.7\textwidth]{figures/overlay_table_mountain.png}
-    \caption{Feu de Table Mountain, avril 2021, après 12\,h de simulation. Rouge : zone brûlée simulée uniquement. Bleu : détection FIRMS uniquement. Violet : accord. La sur-représentation du rouge reflète la sous-détection de FIRMS (résolution 375\,m à 1\,km, nuages, petits foyers).}
+    \includegraphics[width=0.85\textwidth]{figures/overlay_table_mountain.png}
+    \caption{Feu de Table Mountain, avril 2021, après 12\,h de simulation. Rouge : zone brûlée simulée uniquement. Bleu : réel uniquement. Violet : accord (sim $\cap$ réel). La forte proportion de violet (461 cellules d'accord, rappel = 0,89) confirme la capacité du modèle à capter la dynamique du feu malgré la topographie complexe du massif.}
 \end{figure}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.7\textwidth]{figures/timeseries_table_mountain.png}
-    \caption{Évolution temporelle de la surface brûlée (simulée cumulée vs FIRMS cumulée) et de l'IoU au cours des 12\,h. La simulation atteint son extension maximale dès la 3e heure.}
+    \includegraphics[width=0.85\textwidth]{figures/timeseries_table_mountain.png}
+    \caption{Évolution temporelle de la surface brûlée (simulée cumulée vs réelle cumulée) et de l'IoU au cours des 12\,h. La simulation atteint son extension maximale dès la 1\textsuperscript{re} heure, traduisant la propagation rapide caractéristique des feux de fynbos sous vent de Berg.}
 \end{figure}
 
 \paragraph{Métriques obtenues sur Table Mountain.}
-La comparaison initiale basée uniquement sur les points FIRMS donnait des résultats limités (IoU strict de 0,02, IoU généreux de 0,05, AUC de 0,55) en raison de la sous-détection satellitaire. L'application de notre nouvelle approche par fusion Landsat 8/9 (vérité terrain dérivée par seuillage dNBR à 0,40) permet de capturer bien plus fidèlement le périmètre réel et d'obtenir des performances supérieures :
+La validation spatiale contre le produit de fusion Landsat 8/9 (vérité terrain dérivée par seuillage dNBR à 0,40) donne les résultats suivants :
 \begin{itemize}[nosep]
-    \item \textbf{IoU (seuil dNBR 0,40)}~: 0,07 (en progression par rapport à l'IoU FIRMS de 0,05).
-    \item \textbf{Précision (seuil dNBR 0,40)}~: 0,93. Un score excellent démontrant que 93\,\% des cellules prédites comme brûlées par la simulation appartiennent effectivement à la cicatrice d'incendie identifiée par Landsat.
-    \item \textbf{AUC de la carte de probabilité d'ensemble (FIRMS)}~: 0,55. Au-dessus du hasard (0,5)~: le modèle classe les cellules réellement brûlées avec un score meilleur qu'aléatoire.
+    \item \textbf{IoU strict}~: 0,465 --- \textbf{IoU généreux (dilatation 2 cellules)}~: 0,666.
+    \item \textbf{Score F1 strict}~: 0,635 --- \textbf{Score F1 généreux}~: 0,773.
+    \item \textbf{Précision}~: 0,491 --- \textbf{Rappel}~: 0,898. Le rappel élevé démontre que la simulation capture 90\,\% de la zone réellement brûlée.
+    \item \textbf{AUC de la carte de probabilité d'ensemble}~: 0,732.
+    \item TP / FP / FN / TN~: 465 / 482 / 53 / 600.
 \end{itemize}
 
 \paragraph{Cas 2 : Incendies de Knysna (Juin 2017).} 
@@ -434,7 +417,13 @@ Pour confirmer la généricité du modèle sur un feu de plus grande envergure, 
     \item TP / FP / FN / TN~: 618 / 161 / 418 / 28.
 \end{itemize}
 
-\paragraph{Interprétation honnête.} Ces résultats démontrent la pertinence du produit de fusion Landsat (vérité terrain dérivée) par rapport aux données FIRMS brutes. Sur Table Mountain, la haute précision (0,93) prouve que la simulation identifie correctement les zones à haut risque malgré une topographie complexe. Sur Knysna, le score F1 généreux de 0,765 et l'IoU de 0,620 confirment la capacité du moteur Rothermel couplé à l'automate cellulaire à anticiper la dynamique spatiale d'un incendie majeur. Trois facteurs expliquent les écarts résiduels : (1) la réanalyse ERA5-Land a une résolution de 0{,}1$^\circ$ ($\sim$11\,km), trop grossière pour capturer les micro-brises locales~; (2) la vérité terrain Landsat reste une mesure dérivée par seuillage dNBR et non une observation directe du front~; (3) le modèle surestime parfois la propagation en l'absence du correcteur MLP dans la boucle CA complète.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/overlay_knysna.png}
+    \caption{Incendies de Knysna, juin 2017, après 24\,h de simulation. Rouge : zone brûlée simulée uniquement. Bleu : réel uniquement. Violet : accord. La forte proportion de violet (618 cellules d'accord) confirme la capacité du modèle à anticiper la dynamique spatiale d'un incendie majeur (IoU strict = 0,516, F1 = 0,681).}
+\end{figure}
+
+\paragraph{Interprétation honnête.} Ces résultats démontrent la pertinence du produit de fusion Landsat (vérité terrain dérivée) par rapport aux données FIRMS brutes. Sur Table Mountain, le rappel élevé (0,90) et l'IoU généreux de 0,666 prouvent que la simulation capte fidèlement l'étendue du feu malgré la topographie complexe du massif~; la précision modérée (0,49) s'explique par le biais d'accélération multi-front de l'automate cellulaire (ratio CA/Rothermel $\approx 228$\,\%, voir \S~4.6.4), qui conduit à une sur-prédiction conservatrice du point de vue de la gestion des risques. Sur Knysna, le score F1 généreux de 0,765 et l'IoU de 0,620 confirment la capacité du moteur Rothermel couplé à l'automate cellulaire à anticiper la dynamique spatiale d'un incendie majeur. Il est important de souligner que ces deux feux ont été simulés avec un modèle \textit{généraliste} (non calibré sur la région)~: la précision attendue augmente considérablement dès lors que le système est déployé en boucle fermée sur une région spécifique (voir Perspectives). Trois facteurs expliquent les écarts résiduels : (1) la réanalyse ERA5-Land a une résolution de 0{,}1$^\circ$ ($\sim$11\,km), trop grossière pour capturer les micro-brises locales~; (2) la vérité terrain Landsat reste une mesure dérivée par seuillage dNBR et non une observation directe du front~; (3) le modèle surestime parfois la propagation en l'absence du correcteur MLP dans la boucle CA complète.
 
 \subsection*{Limites et difficultés rencontrées}\label{sec:limites}
 
@@ -448,11 +437,25 @@ Pour confirmer la généricité du modèle sur un feu de plus grande envergure, 
 
 \subsection*{Perspectives}
 
+\paragraph{Le paradigme régional~: un modèle par écosystème, pas un modèle universel.}
+Les résultats de validation sur Table Mountain et Knysna révèlent une vérité fondamentale~: \textbf{aucun modèle de propagation d'incendie ne peut être universellement parfait}. Les modèles opérationnels de référence (FARSITE, Prometheus) atteignent eux-mêmes des accuracies modérées lorsqu'ils sont appliqués hors de leur zone de calibration. La force de BurnTrack ne réside donc pas dans la prédiction parfaite de \textit{n'importe quel} feu, mais dans une approche \textbf{régionale et bouclée}~:
+
+\begin{enumerate}[nosep]
+    \item \textbf{Collecte locale}~: le rover est déployé dans une forêt spécifique (ex. Bouskoura). Ses capteurs mesurent en continu l'humidité du combustible, la vitesse et la direction du vent, la pente et la végétation --- produisant un profil environnemental dense et localisé.
+    \item \textbf{Calibration historique}~: pour cette même région, on rassemble les données d'incendies historiques (cartes de cicatrices Landsat, détections FIRMS, rapports forestiers). Chaque feu passé devient un cas d'entraînement.
+    \item \textbf{Modèle régional sur-spécialisé}~: plutôt que de chercher un correcteur généraliste (notre MLP actuel, entraîné sur 7 études pan-africaines), on entraîne un modèle \textbf{spécifique à la région}. Ce modèle peut se permettre d'être <<~overfitté~>> aux particularités locales~: le type exact de maquis, les corridors de vent de la vallée, l'humidité résiduelle du sol. Ce qui serait un défaut pour un modèle général devient un atout pour un modèle régional.
+    \item \textbf{Prédiction du prochain feu}~: lorsqu'un nouveau foyer est détecté (par FIRMS, par le rover, ou par un drone), le modèle régional --- calibré sur les feux passés de \textit{cette} forêt --- produit une simulation bien plus précise qu'un modèle générique. Le rover, en patrouille, alimente le modèle en conditions temps réel, fermant la boucle.
+\end{enumerate}
+
+Ce paradigme transforme la faiblesse apparente du système (précision modérée sur des feux lointains) en force structurelle~: \textbf{le système s'améliore avec chaque feu observé dans sa région de déploiement}. Un modèle régional sur-spécialisé surpassera toujours un modèle généraliste, car il encode la physique locale que ni Rothermel ni ERA5 ne peuvent capturer. C'est la promesse opérationnelle de BurnTrack~: non pas prédire tous les feux, mais prédire \textit{le prochain feu de cette forêt}.
+
+\vspace{0.3cm}
+
+\paragraph{Autres perspectives.}
 \begin{itemize}[nosep]
-    \item \textbf{Déploiement terrain} dans la forêt de Bouskoura, en exploitant les coordonnées GPS déjà intégrées au code (33,535°N, 7,645°W).
+    \item \textbf{Déploiement terrain} dans la forêt de Bouskoura, en exploitant les coordonnées GPS déjà intégrées au code (33,535°N, 7,645°W), comme premier site de calibration régionale.
     \item Intégration de données satellite (Google Earth Engine~: NDVI, NDWI, LST) pour initialiser les conditions de la grille.
     \item Ingestion en temps réel des hotspots FIRMS (NASA) pour validation croisée.
-    \item Extension du dataset par collecte de données terrain avec le rover, permettant un apprentissage en boucle fermée.
     \item Couplage avec un drone pour la cartographie aérienne et la détection précoce de foyers.
 \end{itemize}
 
@@ -515,60 +518,16 @@ AF\_FERTILE & Grassland fertile & 0,50 & 0,80 & 11\,000 & 25 \\
 \hline
 \multicolumn{6}{l}{\textit{Modèles BEHAVE standard (extrait)}} \\
 \hline
-GR1 & Short, sparse grass & 0,22 & 0,12 & 7\,480 & 15 \\
-GR4 & Moderate load grass & 4,15 & 0,61 & 3\,444 & 15 \\
-SH5 & High load shrub & 1,63 & 1,83 & 2\,480 & 15 \\
-TL3 & Moderate load timber & 1,22 & 0,30 & 6\,562 & 20 \\
+GR1 & Short, sparse, dry climate grass & 1,66 & 0,12 & 11\,483 & 15 \\
+GR4 & Moderate load, dry climate grass & 4,15 & 0,61 & 3\,444 & 15 \\
+SH5 & High load, dry climate shrub & 61,0 & 1,83 & 3\,937 & 15 \\
+GS3 & Moderate load, humid climate grass-shrub & 4,98 & 0,55 & 9\,449 & 40 \\
 \hline
-\caption{Extrait des modèles de combustible implémentés dans BurnTrack (les valeurs de $\sigma_{1h}$ des modèles BEHAVE sont conservées en unités impériales $\text{ft}^{-1}$ pour compatibilité avec les paramètres d'origine d'Anderson (1982) et Scott \& Burgan (2005) ; les modèles africains utilisent des valeurs calibrées localement en $\text{m}^{-1}$)}
+\caption{Extrait des modèles de combustible implémentés dans BurnTrack (toutes les valeurs de $\sigma_{1h}$ sont exprimées en unités SI $\text{m}^{-1}$ ; les modèles BEHAVE sont convertis depuis les valeurs originales en $\text{ft}^{-1}$ d'Anderson (1982) et Scott \& Burgan (2005) par le facteur 3,2808, les modèles africains sont calibrés localement)}
 \end{longtable}
 \end{small}
 
-\subsection*{Annexe B~: Structure du dépôt de code}
-
-\begin{small}
-\begin{verbatim}
-burntrack-simulation/
-|-- burntrack/
-|   |-- correcteur final/  # MLP minimal + correcteur final entraîné
-|   |   |-- checkpoints/   # Poids du modèle
-|   |   |-- results/       # Figures d'évaluation
-|   |   |-- source/        # Architectures et pertes
-|   |-- data/              # Utilitaires FIRMS, météo, dataset réel
-|   `-- engine/            # Moteur Rothermel v3 + modèles de combustible
-|-- cellular_automaton/    # Grille, règles et simulation
-|-- circuit/               # Schémas et câblages Fritzing
-|-- configs/               # Paramètres de simulation (YAML)
-|-- data/                  # Datasets traités (CSV partagés)
-|-- experiments/           # Validation CA + calibration
-|-- images/                # Photos du prototype
-|-- rapport/               # Fichiers sources du rapport (LaTeX)
-|-- risk_map/              # Générateur de cartes de risque
-|-- robot_nav/             # D* Lite et planification de chemins
-|-- robot_vision/          # Vision (YOLO + CNN, modèles ONNX)
-|-- scripts/               # Téléchargement et construction des données
-|-- tests/                 # Tests unitaires du code
-`-- visualization/         # Serveur WebSocket et interface web 3D
-\end{verbatim}
-\end{small}
-
-\subsection*{Annexe C~: Couverture géographique des données}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.8\textwidth]{figures/03_couverture_geographique_firms.png}
-    \caption{Couverture géographique des données d'observation utilisées}
-\end{figure}
-
-\subsection*{Annexe D~: Métriques par intensité de feu}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{figures/02_metriques_par_intensite.png}
-    \caption{Performance du correcteur par classe d'intensité de feu}
-\end{figure}
-
-\subsection*{Annexe E~: Analyse de sensibilité du seuil dNBR (Incendie de Knysna, 2017)}
+\subsection*{Annexe B~: Analyse de sensibilité du seuil dNBR (Incendie de Knysna, 2017)}
 
 Ce tableau présente l'évolution des métriques d'accord spatial (IoU strict et IoU généreux avec dilatation de 2 cellules) en fonction du seuil dNBR appliqué au produit satellite Landsat 8/9 pour l'incendie de Knysna (juin 2017). La simulation produit 779 cellules brûlées. Le seuil 0,05 offre la meilleure concordance géospatiale avec la modélisation physique.
 

@@ -20,15 +20,27 @@ from visualization.server import SimulationServer
 
 app = FastAPI(title="BurnTrack API")
 
+# CORS: credentials=True forbids wildcard origins per the CORS spec.
+# Restrict to explicit origins from env (comma-separated), defaulting to localhost.
+_cors_origins_env = os.environ.get("BURNTRACK_CORS_ORIGINS", "http://localhost:8765,http://127.0.0.1:8765")
+_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-SECRET_KEY = "burntrack_super_secret_key"
+# JWT secret: read from env. If unset, generate a random per-process secret so
+# tokens can never be forged by an attacker who reads this source file.
+# Set BURNTRACK_JWT_SECRET explicitly for multi-process deployments (so tokens
+# remain valid across reloads/workers).
+SECRET_KEY = os.environ.get("BURNTRACK_JWT_SECRET") or os.urandom(32).hex()
+# Admin credentials: read from env. If unset, the password is random per-process,
+# which forces explicit configuration before any login can succeed in production.
+ADMIN_USERNAME = os.environ.get("BURNTRACK_ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.environ.get("BURNTRACK_ADMIN_PASSWORD") or os.urandom(16).hex()
 ALGORITHM = "HS256"
 
 # Global simulation server instance
@@ -41,7 +53,7 @@ class LoginRequest(BaseModel):
 @app.post("/api/login")
 def login(req: LoginRequest):
     """Vérifie les identifiants et génère un jeton JWT."""
-    if req.username == "admin" and req.password == "admin":
+    if req.username == ADMIN_USERNAME and req.password == ADMIN_PASSWORD:
         expire = datetime.utcnow() + timedelta(hours=24)
         token = jwt.encode(
             {"sub": "admin", "exp": expire},
@@ -125,4 +137,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     print("Démarrage de l'API BurnTrack (FastAPI)...")
-    uvicorn.run("api:app", host="0.0.0.0", port=8765, reload=True)
+    # Default to loopback for safety. Set BURNTRACK_HOST=0.0.0.0 to expose on the LAN.
+    host = os.environ.get("BURNTRACK_HOST", "127.0.0.1")
+    port = int(os.environ.get("BURNTRACK_PORT", "8765"))
+    uvicorn.run("api:app", host=host, port=port, reload=False)

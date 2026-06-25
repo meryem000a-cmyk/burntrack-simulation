@@ -28,11 +28,15 @@ dev = ["pytest>=7.0", "pytest-cov>=4.0"]
 vision = ["onnxruntime>=1.15", "pillow>=10.0", "opencv-python>=4.8"]
 gee = ["earthengine-api>=1.0"]
 
-[project.scripts]
-burntrack-train = "scripts.train_corrector:main"
-burntrack-synthetic = "scripts.generate_synthetic:main"
-burntrack-real-data = "scripts.build_real_dataset:main"
-burntrack-pipeline = "scripts.run_pipeline:main"
+# NOTE: [project.scripts] was removed on 2026-06-25. The four declared entry
+# points were broken: three targeted files archived under archive/scripts_old/
+# (train_corrector, generate_synthetic, run_pipeline) and the fourth
+# (build_real_dataset) lived in scripts/, which is not a package (no __init__.py)
+# and is excluded from [tool.setuptools.packages.find]. Run the active scripts
+# directly instead, e.g.:
+#   venv/bin/python scripts/build_real_dataset.py
+# The burntrack-synthetic entry point also contradicted the project's
+# NO-synthetic-data constraint (see ReadIfAgent.md).
 
 [tool.setuptools.packages.find]
 include = ["burntrack*"]

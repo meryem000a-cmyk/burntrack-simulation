@@ -297,7 +297,6 @@ class BurnTrackPredictor:
             slope_pct=slope_pct,
             output=output,
             fuel_model=fuel_model,
-            target_real_ros=target_real_ros
         )
 
         # 3. Prédiction delta par le modèle IA
