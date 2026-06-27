@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  DESIGN PROMPT — copy this to Claude or any AI designer to iterate further  ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║  Redesign a futuristic fire-prevention monitoring dashboard called           ║
+║  "BurnTrack" for an autonomous rover scanning a 1.5 m × 1.0 m demo barrier. ║
+║                                                                              ║
+║  VISUAL IDENTITY                                                             ║
+║  • Background: near-black with warm red-amber undertone (#0b0503)           ║
+║  • Primary glow: fire orange-red #ff4500 + amber #ff8c00 + gold #ffd700    ║
+║  • Tech/rover accent: electric cyan #00d4ff                                  ║
+║  • Risk heatmap must use THERMAL IMAGING palette:                            ║
+║      0% risk → black, 40% → deep crimson, 60% → fiery orange,              ║
+║      80% → amber-gold, 100% → white-hot                                     ║
+║  • Font: Orbitron (headers), Share Tech Mono (data values)                  ║
+║                                                                              ║
+║  ANIMATED EFFECTS REQUIRED                                                   ║
+║  1. Floating ember particles rising from the bottom across the whole UI     ║
+║  2. Horizontal neon scan-line sweeping the grid top→bottom in a loop        ║
+║  3. Pulsing fire-glow border around the barrier canvas                      ║
+║  4. Flickering flare on cells with risk > 0.75                              ║
+║  5. Expanding sonar-ring pulse on each new YOLO detection                   ║
+║  6. Rover blip with animated direction arrow + cyan halo                    ║
+║                                                                              ║
+║  LAYOUT                                                                      ║
+║  • Left: Y-axis ruler (meters), barrier canvas, X-axis ruler                ║
+║  • Right panel: THREAT LEVEL composite bar, rover XY/heading,              ║
+║    4-tier risk breakdown, scrollable species detection log, legend           ║
+║  • Header: flame logo, project name, WS status, live clock                  ║
+║                                                                              ║
+║  DATA                                                                        ║
+║  • WebSocket ws://localhost:8766 — messages: {rover:{x,y,heading},          ║
+║    detections:[{label,confidence,x,y,risk}], risk_grid:[[…]]}              ║
+║  • Graceful fallback to animated simulation when not connected              ║
+║  • Hover tooltip on each grid cell: coordinates + risk %                    ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+-->
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BurnTrack · Interface Démo Terrain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════
+   RESET & VARIABLES
+═══════════════════════════════════════════════ */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --fire1:#ff4500;
+  --fire2:#ff8c00;
+  --fire3:#ffd700;
+  --cyan: #00d4ff;
+  --bg:   #0b0503;
+  --panel:#130804;
+  --card: #1a0e07;
+  --bdr:  #3a1a08;
+  --txt:  #dda060;
+  --dim:  #5a3020;
+  --red:  #cc2200;
+}
+
+body{
+  background:var(--bg);
+  color:var(--txt);
+  font-family:'Share Tech Mono',monospace;
+  height:100vh;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+
+/* Ember overlay canvas (full-screen, pointer-events:none) */
+#emberCanvas{
+  position:fixed;inset:0;
+  pointer-events:none;
+  z-index:0;
+}
+
+/* Everything else above the embers */
+header,main{position:relative;z-index:1;}
+
+/* ═══════════════════════════════════════════════
+   HEADER
+═══════════════════════════════════════════════ */
+header{
+  background:linear-gradient(180deg,#1a0903 0%,#0e0602 100%);
+  border-bottom:2px solid var(--fire1);
+  padding:10px 20px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  flex-shrink:0;
+  box-shadow:0 4px 30px rgba(255,69,0,.35);
+}
+
+.logo{display:flex;align-items:center;gap:14px;}
+
+.logo-emblem{
+  width:42px;height:42px;
+  border:2px solid var(--fire1);
+  border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:24px;
+  background:radial-gradient(circle,rgba(255,69,0,.3) 0%,rgba(11,5,3,0) 70%);
+  box-shadow:0 0 20px rgba(255,69,0,.6),inset 0 0 12px rgba(255,69,0,.2);
+  animation:emblemPulse 3s ease-in-out infinite;
+}
+@keyframes emblemPulse{
+  0%,100%{box-shadow:0 0 20px rgba(255,69,0,.6),inset 0 0 12px rgba(255,69,0,.2);}
+  50%    {box-shadow:0 0 35px rgba(255,140,0,.8),inset 0 0 18px rgba(255,140,0,.3);}
+}
+
+.logo-text h1{
+  font-family:'Orbitron',sans-serif;
+  font-size:20px;font-weight:900;
+  color:#fff;letter-spacing:4px;
+  text-shadow:0 0 20px var(--fire1),0 0 40px rgba(255,69,0,.4);
+}
+.logo-text p{
+  font-size:9px;color:var(--dim);letter-spacing:2px;margin-top:2px;
+}
+
+.hdr-right{display:flex;align-items:center;gap:20px;}
+
+.ws-pill{
+  display:flex;align-items:center;gap:8px;
+  background:rgba(0,0,0,.5);
+  border:1px solid var(--bdr);
+  border-radius:20px;
+  padding:5px 12px;
+  font-size:10px;letter-spacing:2px;
+}
+.ws-dot{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--fire1);
+  box-shadow:0 0 6px var(--fire1);
+}
+.ws-dot.live{background:#00ff88;box-shadow:0 0 6px #00ff88;animation:blk 2s infinite;}
+.ws-dot.sim {background:var(--fire2);box-shadow:0 0 6px var(--fire2);animation:blk 1.5s infinite;}
+.ws-dot.err {background:#cc0000;box-shadow:0 0 6px #cc0000;}
+@keyframes blk{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+.clock{
+  font-family:'Share Tech Mono',monospace;
+  font-size:14px;color:var(--fire3);
+  background:rgba(0,0,0,.5);
+  border:1px solid var(--bdr);
+  padding:5px 12px;border-radius:4px;
+  text-shadow:0 0 8px var(--fire3);
+}
+
+/* ═══════════════════════════════════════════════
+   MAIN LAYOUT
+═══════════════════════════════════════════════ */
+main{
+  flex:1;display:flex;padding:12px;gap:12px;
+  overflow:hidden;min-height:0;
+}
+
+/* ── Canvas column ── */
+.canvas-col{flex:1;display:flex;flex-direction:column;min-width:0;}
+
+.canvas-title{
+  font-family:'Orbitron',sans-serif;
+  font-size:9px;letter-spacing:3px;color:var(--dim);
+  margin-bottom:7px;padding-left:48px;text-transform:uppercase;
+}
+
+.canvas-row{display:flex;align-items:flex-start;gap:6px;flex:1;}
+
+/* Y ruler */
+.ruler-y{
+  width:42px;flex-shrink:0;
+  display:flex;flex-direction:column;align-items:flex-end;
+  padding-right:5px;
+}
+.ruler-y span{
+  font-size:9px;color:var(--dim);
+  display:flex;align-items:center;justify-content:flex-end;gap:4px;
+}
+.rtick{width:5px;height:1px;background:var(--bdr);}
+
+/* Barrier wrapper */
+.barrier-outer{flex:1;display:flex;flex-direction:column;}
+
+.barrier-wrap{
+  position:relative;
+  border:2px solid transparent;
+  border-radius:6px;
+  overflow:hidden;
+  background:var(--bg);
+  /* Animated fire border via box-shadow */
+  box-shadow:
+    0 0  0 1px rgba(255,69,0,.3),
+    0 0 20px rgba(255,69,0,.25),
+    0 0 50px rgba(255,69,0,.10),
+    0 0 80px rgba(255,69,0,.05);
+  animation:borderFlicker 4s ease-in-out infinite;
+}
+@keyframes borderFlicker{
+  0%,100%{box-shadow:0 0 0 1px rgba(255,69,0,.3),0 0 20px rgba(255,69,0,.25),0 0 50px rgba(255,69,0,.1);}
+  30%    {box-shadow:0 0 0 1px rgba(255,140,0,.5),0 0 30px rgba(255,140,0,.4),0 0 60px rgba(255,140,0,.15);}
+  70%    {box-shadow:0 0 0 1px rgba(255,69,0,.4),0 0 25px rgba(255,69,0,.3),0 0 55px rgba(255,69,0,.12);}
+}
+
+canvas#barrier{display:block;}
+
+/* Overlays */
+.badge{
+  position:absolute;top:8px;left:8px;
+  font-family:'Orbitron',sans-serif;
+  font-size:8px;font-weight:700;letter-spacing:3px;
+  padding:3px 10px;border-radius:3px;
+  text-transform:uppercase;
+}
+.badge.sim {background:rgba(255,140,0,.85);color:#000;}
+.badge.live{background:rgba(0,255,136,.85);color:#000;}
+
+#tip{
+  position:absolute;pointer-events:none;
+  background:rgba(11,5,3,.97);
+  border:1px solid var(--bdr);
+  border-left:3px solid var(--fire1);
+  border-radius:5px;
+  padding:7px 12px;
+  font-size:10px;color:var(--txt);
+  display:none;z-index:10;
+  white-space:nowrap;
+  box-shadow:0 4px 20px rgba(255,69,0,.25);
+}
+
+/* X ruler */
+.ruler-x{display:flex;margin-top:5px;}
+.ruler-x span{font-size:9px;color:var(--dim);text-align:center;}
+
+/* ── Side panel ── */
+.side-panel{
+  width:265px;flex-shrink:0;
+  display:flex;flex-direction:column;gap:10px;
+  overflow-y:auto;overflow-x:hidden;
+}
+
+/* Cards */
+.card{
+  background:var(--card);
+  border:1px solid var(--bdr);
+  border-radius:8px;padding:12px;flex-shrink:0;
+  position:relative;overflow:hidden;
+}
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--fire1),transparent);
+  animation:scanTop 4s linear infinite;
+}
+@keyframes scanTop{0%{transform:translateX(-100%);}100%{transform:translateX(100%);}}
+
+.card-title{
+  font-family:'Orbitron',sans-serif;
+  font-size:8px;letter-spacing:3px;color:var(--fire2);
+  margin-bottom:10px;padding-bottom:6px;
+  border-bottom:1px solid var(--bdr);text-transform:uppercase;
+}
+
+/* Threat level */
+.threat-bar-bg{
+  height:20px;border-radius:4px;
+  background:rgba(0,0,0,.5);
+  border:1px solid var(--bdr);
+  overflow:hidden;margin-bottom:6px;
+  position:relative;
+}
+.threat-bar-fill{
+  height:100%;border-radius:4px;
+  transition:width .8s ease;
+  position:relative;overflow:hidden;
+}
+.threat-bar-fill::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.15) 50%,transparent 100%);
+  animation:shimmer 2s linear infinite;
+}
+@keyframes shimmer{0%{transform:translateX(-100%);}100%{transform:translateX(100%);}}
+.threat-label{
+  font-family:'Orbitron',sans-serif;
+  font-size:14px;font-weight:700;
+  text-align:center;letter-spacing:2px;
+  text-shadow:0 0 15px currentColor;
+  margin-top:4px;
+}
+
+/* Coord boxes */
+.coord-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;}
+.cbox{
+  background:rgba(0,0,0,.5);border-radius:5px;
+  padding:8px 4px;text-align:center;
+  border:1px solid var(--bdr);
+}
+.cval{
+  font-family:'Orbitron',sans-serif;
+  font-size:15px;font-weight:700;color:#fff;
+  text-shadow:0 0 10px var(--cyan);
+}
+.clbl{font-size:8px;color:var(--dim);letter-spacing:1px;margin-top:2px;}
+
+/* Risk bars */
+.rrow{display:flex;align-items:center;gap:7px;margin-bottom:5px;}
+.rswatch{width:10px;height:10px;border-radius:2px;flex-shrink:0;}
+.rlabel{font-size:9px;color:var(--dim);width:62px;}
+.rtrack{flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;}
+.rfill{height:100%;border-radius:3px;transition:width .6s ease;}
+.rpct{font-size:9px;font-family:'Share Tech Mono',monospace;color:var(--txt);width:30px;text-align:right;}
+
+.risk-summary{
+  display:grid;grid-template-columns:1fr 1fr;gap:7px;
+  margin-top:10px;padding-top:10px;border-top:1px solid var(--bdr);
+}
+
+/* Detection log */
+.det-log{
+  max-height:185px;overflow-y:auto;
+  display:flex;flex-direction:column;gap:5px;
+}
+.det-entry{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 9px;
+  background:rgba(0,0,0,.4);
+  border-radius:5px;
+  border-left:3px solid var(--fire1);
+  animation:slideIn .3s ease;flex-shrink:0;
+}
+@keyframes slideIn{from{opacity:0;transform:translateX(-8px);}to{opacity:1;transform:translateX(0);}}
+.det-icon{font-size:15px;}
+.det-body{flex:1;}
+.det-name{font-size:10px;font-weight:600;color:#fff;font-family:'Orbitron',sans-serif;}
+.det-meta{font-size:9px;color:var(--dim);margin-top:1px;}
+.det-conf{font-size:10px;font-family:'Share Tech Mono',monospace;font-weight:700;}
+.empty-log{font-size:10px;color:var(--dim);text-align:center;padding:18px 0;}
+
+/* Legend */
+.legend{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.leg-item{display:flex;align-items:center;gap:7px;font-size:9px;}
+.leg-sq{width:12px;height:12px;border-radius:2px;flex-shrink:0;}
+
+/* Buttons */
+.btn-row{display:flex;gap:8px;}
+.btn{
+  flex:1;padding:10px;border-radius:6px;cursor:pointer;
+  font-family:'Orbitron',sans-serif;
+  font-size:8px;letter-spacing:2px;font-weight:700;
+  text-transform:uppercase;transition:all .2s;
+  background:rgba(0,0,0,.5);
+  border:1px solid var(--bdr);color:var(--txt);
+}
+.btn:hover{border-color:var(--fire2);color:var(--fire2);}
+.btn.fire{
+  background:linear-gradient(135deg,#cc2200,#882200);
+  border:1px solid var(--fire1);color:#fff;
+  box-shadow:0 0 15px rgba(255,69,0,.35);
+}
+.btn.fire:hover{box-shadow:0 0 25px rgba(255,69,0,.6);}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<!-- Full-screen ember canvas -->
+<canvas id="emberCanvas"></canvas>
+
+<!-- ══════════ HEADER ══════════ -->
+<header>
+  <div class="logo">
+    <div class="logo-emblem">🔥</div>
+    <div class="logo-text">
+      <h1>BURNTRACK</h1>
+      <p>Système de prévention des incendies forestiers · Groupe 7 · École Centrale Casablanca</p>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="ws-pill">
+      <div class="ws-dot sim" id="wsDot"></div>
+      <span id="wsLabel">SIMULATION</span>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+</header>
+
+<!-- ══════════ MAIN ══════════ -->
+<main>
+
+  <!-- Canvas column -->
+  <div class="canvas-col">
+    <div class="canvas-title">Vue de dessus · Barrière de démonstration · 1,5 m × 1,0 m · Imagerie thermique</div>
+    <div class="canvas-row">
+
+      <div class="ruler-y" id="rulerY"></div>
+
+      <div class="barrier-outer">
+        <div class="barrier-wrap" id="barrierWrap">
+          <canvas id="barrier"></canvas>
+          <div class="badge sim" id="modeBadge">SIMULATION</div>
+          <div id="tip"></div>
+        </div>
+        <div class="ruler-x" id="rulerX"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Side panel -->
+  <div class="side-panel">
+
+    <!-- Threat level -->
+    <div class="card">
+      <div class="card-title">⚠ Niveau de menace incendie</div>
+      <div class="threat-bar-bg">
+        <div class="threat-bar-fill" id="threatFill" style="width:0%;background:linear-gradient(90deg,#880000,#ff4500,#ff8c00);"></div>
+      </div>
+      <div class="threat-label" id="threatLabel" style="color:var(--fire1);">CALCUL…</div>
+    </div>
+
+    <!-- Rover position -->
+    <div class="card">
+      <div class="card-title">◈ Position du rover</div>
+      <div class="coord-grid">
+        <div class="cbox"><div class="cval" id="rX">—</div><div class="clbl">X (cm)</div></div>
+        <div class="cbox"><div class="cval" id="rY">—</div><div class="clbl">Y (cm)</div></div>
+        <div class="cbox"><div class="cval" id="rH">—</div><div class="clbl">Cap (°)</div></div>
+      </div>
+    </div>
+
+    <!-- Risk breakdown -->
+    <div class="card">
+      <div class="card-title">◉ Carte thermique de risque</div>
+      <div class="rrow">
+        <div class="rswatch" style="background:#1a0500"></div>
+        <span class="rlabel">Nul</span>
+        <div class="rtrack"><div class="rfill" id="rb0" style="background:#440a00"></div></div>
+        <span class="rpct" id="rp0">—</span>
+      </div>
+      <div class="rrow">
+        <div class="rswatch" style="background:#882200"></div>
+        <span class="rlabel">Modéré</span>
+        <div class="rtrack"><div class="rfill" id="rb1" style="background:#882200"></div></div>
+        <span class="rpct" id="rp1">—</span>
+      </div>
+      <div class="rrow">
+        <div class="rswatch" style="background:#ff4500"></div>
+        <span class="rlabel">Élevé</span>
+        <div class="rtrack"><div class="rfill" id="rb2" style="background:#ff4500"></div></div>
+        <span class="rpct" id="rp2">—</span>
+      </div>
+      <div class="rrow">
+        <div class="rswatch" style="background:#ffd700"></div>
+        <span class="rlabel">Critique</span>
+        <div class="rtrack"><div class="rfill" id="rb3" style="background:#ffd700"></div></div>
+        <span class="rpct" id="rp3">—</span>
+      </div>
+      <div class="risk-summary">
+        <div class="cbox">
+          <div class="cval" id="riskAvg" style="font-size:13px;text-shadow:0 0 10px var(--fire1);">—</div>
+          <div class="clbl">Moy.</div>
+        </div>
+        <div class="cbox">
+          <div class="cval" id="riskMax" style="font-size:13px;text-shadow:0 0 10px var(--fire3);">—</div>
+          <div class="clbl">Max</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detections -->
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+      <div class="card-title">◎ Détections YOLO v8 · ResNet-18</div>
+      <div class="det-log" id="detLog">
+        <div class="empty-log">Attente des données rover…</div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="card">
+      <div class="card-title">■ Légende thermique</div>
+      <div class="legend">
+        <div class="leg-item"><div class="leg-sq" style="background:#440a00"></div>Nul &lt; 20%</div>
+        <div class="leg-item"><div class="leg-sq" style="background:#882200"></div>Modéré 20–50%</div>
+        <div class="leg-item"><div class="leg-sq" style="background:#ff4500"></div>Élevé 50–75%</div>
+        <div class="leg-item"><div class="leg-sq" style="background:#ffd700"></div>Critique &gt; 75%</div>
+        <div class="leg-item"><div class="leg-sq" style="background:rgba(0,212,255,.7);border-radius:50%"></div>Rover</div>
+        <div class="leg-item"><div class="leg-sq" style="background:rgba(255,255,255,.9);border-radius:50%"></div>Détection</div>
+      </div>
+    </div>
+
+    <!-- Buttons -->
+    <div class="btn-row">
+      <button class="btn fire" id="connectBtn" onclick="toggleConnect()">⚡ WS Live</button>
+      <button class="btn" onclick="resetSim()">↺ Reset</button>
+    </div>
+
+  </div>
+</main>
+
+<script>
+// ══════════════════════════════════════════════════════
+// GRID CONFIG
+// ══════════════════════════════════════════════════════
+const COLS = 15, ROWS = 10;
+const WS_URL = 'ws://localhost:8766';
+let CELL = 56, W, H;
+
+// STATE
+let riskGrid = [], detections = [], rover = {x:0,y:0,heading:0,trail:[]};
+let ws = null, wsConnected = false, simTime = 0, frameId = null, lastDetTick = 0;
+let scanY = 0; // scan line position (0..H)
+
+// SPECIES
+const SPECIES = [
+  {name:'Eucalyptus camaldulensis',icon:'🌿',risk:0.65,color:'#ff8c00'},
+  {name:'Pinus pinaster',          icon:'🌲',risk:0.60,color:'#ff8c00'},
+  {name:'Matorral / Garrigue',     icon:'🌾',risk:0.90,color:'#ff2200'},
+  {name:'Quercus suber',           icon:'🌳',risk:0.65,color:'#ff8c00'},
+  {name:'Artemisia spp.',          icon:'🍃',risk:0.75,color:'#ff4500'},
+  {name:'Litière sèche',           icon:'🍂',risk:0.82,color:'#ff2200'},
+  {name:'Herbe sèche',             icon:'🌾',risk:0.88,color:'#ff2200'},
+  {name:'Sol nu',                  icon:'🪨',risk:0.06,color:'#444'},
+];
+
+// ══════════════════════════════════════════════════════
+// EMBER PARTICLES
+// ══════════════════════════════════════════════════════
+const emberCvs = document.getElementById('emberCanvas');
+const eCtx = emberCvs.getContext('2d');
+let embers = [];
+
+function resizeEmberCanvas(){
+  emberCvs.width  = window.innerWidth;
+  emberCvs.height = window.innerHeight;
+}
+
+class Ember {
+  constructor(){ this.reset(); }
+  reset(){
+    this.x = Math.random() * window.innerWidth;
+    this.y = window.innerHeight + Math.random() * 60;
+    this.size  = Math.random() * 2.5 + 0.5;
+    this.vy    = -(Math.random() * 1.2 + 0.4);
+    this.vx    = (Math.random() - 0.5) * 0.6;
+    this.life  = 1;
+    this.decay = Math.random() * 0.006 + 0.003;
+    const h = Math.random() * 40 + 5;   // hue 5..45 (reds to golds)
+    const l = Math.random() * 35 + 45;  // lightness 45..80%
+    this.color = `hsl(${h},100%,${l}%)`;
+  }
+  step(){
+    this.x += this.vx + Math.sin(this.y * 0.02) * 0.3;
+    this.y += this.vy;
+    this.life -= this.decay;
+    if(this.life <= 0 || this.y < -10) this.reset();
+  }
+  draw(){
+    eCtx.globalAlpha = this.life * 0.7;
+    eCtx.fillStyle = this.color;
+    eCtx.shadowColor = this.color;
+    eCtx.shadowBlur = 4;
+    eCtx.beginPath();
+    eCtx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+    eCtx.fill();
+  }
+}
+
+function initEmbers(n=90){
+  embers = [];
+  for(let i=0;i<n;i++){
+    const e = new Ember();
+    e.y = Math.random() * window.innerHeight; // spread initially
+    e.life = Math.random();
+    embers.push(e);
+  }
+}
+
+function stepEmbers(){
+  eCtx.clearRect(0, 0, emberCvs.width, emberCvs.height);
+  eCtx.shadowBlur = 0;
+  for(const e of embers){ e.step(); e.draw(); }
+  eCtx.globalAlpha = 1;
+  eCtx.shadowBlur = 0;
+}
+
+// ══════════════════════════════════════════════════════
+// CANVAS SIZE
+// ══════════════════════════════════════════════════════
+function initSize(){
+  const mainEl = document.querySelector('main');
+  const side = 265 + 12 + 12;
+  const rulerY = 48;
+  const hdr = document.querySelector('header').offsetHeight;
+  const availW = mainEl.clientWidth  - side - rulerY - 24;
+  const availH = window.innerHeight  - hdr  - 12*2 - 26 - 30;
+  CELL = Math.floor(Math.min(availW/COLS, availH/ROWS));
+  CELL = Math.max(36, Math.min(CELL, 72));
+  W = COLS * CELL; H = ROWS * CELL;
+  const c = document.getElementById('barrier');
+  c.width = W; c.height = H;
+  buildRulers();
+}
+
+// ══════════════════════════════════════════════════════
+// RISK GRID
+// ══════════════════════════════════════════════════════
+function initRiskGrid(){
+  riskGrid = [];
+  for(let r=0;r<ROWS;r++){
+    riskGrid[r]=[];
+    for(let c=0;c<COLS;c++){
+      const base = 0.10 + (c/(COLS-1))*0.50 + (1-r/(ROWS-1))*0.15;
+      const noise = (Math.sin(r*3.7+c*2.1)+Math.cos(r*1.3+c*4.9))*0.07;
+      riskGrid[r][c] = Math.max(0.03, Math.min(0.96, base+noise));
+    }
+  }
+}
+
+// Thermal palette: black → dark red → red-orange → amber → gold-white
+function thermalColor(v, a){
+  let r,g,b;
+  if(v<0.20){      const t=v/0.20;       r=Math.round(60*t);      g=0;               b=0;}
+  else if(v<0.40){ const t=(v-0.20)/0.20; r=Math.round(60+100*t); g=Math.round(5*t);  b=0;}
+  else if(v<0.60){ const t=(v-0.40)/0.20; r=Math.round(160+80*t); g=Math.round(5+55*t); b=0;}
+  else if(v<0.78){ const t=(v-0.60)/0.18; r=255;                  g=Math.round(60+120*t); b=Math.round(8*t);}
+  else if(v<0.92){ const t=(v-0.78)/0.14; r=255;                  g=Math.round(180+55*t); b=Math.round(8+100*t);}
+  else {            const t=(v-0.92)/0.08; r=255;                  g=Math.round(235+20*t); b=Math.round(108+147*t);}
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// ══════════════════════════════════════════════════════
+// RULERS
+// ══════════════════════════════════════════════════════
+function buildRulers(){
+  const yr = document.getElementById('rulerY');
+  let html='';
+  for(let r=0;r<=ROWS;r++){
+    const m=((ROWS-r)/10).toFixed(1);
+    html+=`<span style="height:${r<ROWS?CELL:0}px;font-size:9px;color:var(--dim);">
+      ${r%2===0?m+'m':''}<span class="rtick"></span></span>`;
+  }
+  yr.innerHTML=html;
+
+  const xr = document.getElementById('rulerX');
+  let xhtml='';
+  for(let c=0;c<=COLS;c++){
+    xhtml+=`<span style="width:${c<COLS?CELL:0}px;font-size:9px;color:var(--dim);text-align:${c===0?'left':'center'};">
+      ${c%3===0?(c/10).toFixed(1)+'m':''}</span>`;
+  }
+  xr.innerHTML=xhtml;
+}
+
+// ══════════════════════════════════════════════════════
+// DRAW
+// ══════════════════════════════════════════════════════
+const canvas = document.getElementById('barrier');
+const ctx = canvas.getContext('2d');
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  // BG
+  ctx.fillStyle='#080200';
+  ctx.fillRect(0,0,W,H);
+
+  // Background vignette
+  const vg = ctx.createRadialGradient(W/2,H/2,H*0.2,W/2,H/2,H*0.8);
+  vg.addColorStop(0,'rgba(20,5,0,0)');
+  vg.addColorStop(1,'rgba(0,0,0,0.55)');
+  ctx.fillStyle=vg;
+  ctx.fillRect(0,0,W,H);
+
+  // ── THERMAL HEATMAP ──
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const v = riskGrid[r][c];
+      const x=c*CELL, y=r*CELL;
+
+      // Base cell fill
+      ctx.fillStyle = thermalColor(v, 0.78);
+      ctx.fillRect(x+1,y+1,CELL-2,CELL-2);
+
+      // Extra glow on high-risk cells (flickering)
+      if(v>0.65){
+        const flicker = 0.5 + 0.5*Math.sin(Date.now()*0.003*(1+v) + r*1.3 + c*2.1);
+        const gr = ctx.createRadialGradient(x+CELL/2,y+CELL/2,0,x+CELL/2,y+CELL/2,CELL*0.6);
+        gr.addColorStop(0, thermalColor(v, 0.35*flicker));
+        gr.addColorStop(1,'transparent');
+        ctx.fillStyle=gr;
+        ctx.fillRect(x,y,CELL,CELL);
+      }
+    }
+  }
+
+  // ── GRID LINES ──
+  ctx.strokeStyle='rgba(255,100,0,0.12)';
+  ctx.lineWidth=0.5;
+  for(let c=0;c<=COLS;c++){ctx.beginPath();ctx.moveTo(c*CELL,0);ctx.lineTo(c*CELL,H);ctx.stroke();}
+  for(let r=0;r<=ROWS;r++){ctx.beginPath();ctx.moveTo(0,r*CELL);ctx.lineTo(W,r*CELL);ctx.stroke();}
+
+  // Heavy lines every 50 cm
+  ctx.strokeStyle='rgba(255,120,0,0.28)';
+  ctx.lineWidth=1;
+  for(let c=0;c<=COLS;c+=5){ctx.beginPath();ctx.moveTo(c*CELL,0);ctx.lineTo(c*CELL,H);ctx.stroke();}
+  for(let r=0;r<=ROWS;r+=5){ctx.beginPath();ctx.moveTo(0,r*CELL);ctx.lineTo(W,r*CELL);ctx.stroke();}
+
+  // Cell coord micro-labels
+  ctx.fillStyle='rgba(255,140,0,0.18)';
+  ctx.font=`${Math.max(7,CELL*0.13)}px 'Share Tech Mono',monospace`;
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    ctx.fillText(`${String(c*10).padStart(2,'0')},${String((ROWS-r-1)*10).padStart(2,'0')}`,c*CELL+3,r*CELL+11);
+  }
+
+  // ── SCAN LINE ──
+  scanY = (scanY + 1.2) % H;
+  const slGrad = ctx.createLinearGradient(0, scanY-30, 0, scanY+8);
+  slGrad.addColorStop(0,'rgba(255,140,0,0)');
+  slGrad.addColorStop(0.7,'rgba(255,180,0,0.12)');
+  slGrad.addColorStop(1,'rgba(255,220,0,0.45)');
+  ctx.fillStyle = slGrad;
+  ctx.fillRect(0, scanY-30, W, 38);
+  // Bright scan edge
+  ctx.fillStyle='rgba(255,200,50,0.55)';
+  ctx.fillRect(0, scanY, W, 1.5);
+
+  // ── DETECTIONS ──
+  const now = Date.now();
+  for(const d of detections){
+    const age=(now-d.time)/1000;
+    if(age>18) continue;
+    const alpha=Math.min(1,Math.max(0,1-(age-10)/8));
+
+    // Sonar rings
+    for(let i=0;i<3;i++){
+      const phase=(age+i*0.55)%1.65;
+      const rad=12+phase*32;
+      const a2=Math.max(0,(0.55-phase*0.33))*alpha;
+      ctx.beginPath();ctx.arc(d.x,d.y,rad,0,Math.PI*2);
+      ctx.strokeStyle=`rgba(255,200,80,${a2})`;
+      ctx.lineWidth=1.2;ctx.stroke();
+    }
+
+    // Dot with fire glow
+    ctx.shadowColor=d.color||'#ff8c00';
+    ctx.shadowBlur=14;
+    ctx.beginPath();ctx.arc(d.x,d.y,7,0,Math.PI*2);
+    ctx.fillStyle=`rgba(255,220,100,${alpha})`;
+    ctx.fill();
+    ctx.shadowBlur=0;
+
+    // Cross hair
+    const ch=12;
+    ctx.strokeStyle=`rgba(255,220,100,${0.6*alpha})`;
+    ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.moveTo(d.x-ch,d.y);ctx.lineTo(d.x+ch,d.y);
+    ctx.moveTo(d.x,d.y-ch);ctx.lineTo(d.x,d.y+ch);
+    ctx.stroke();
+
+    // Label bubble
+    const fs=Math.max(9,CELL*0.15);
+    ctx.font=`bold ${fs}px 'Orbitron',sans-serif`;
+    const tw=ctx.measureText(d.label).width;
+    const bw=tw+46,bh=23;
+    const bx=Math.max(2,Math.min(W-bw-2,d.x-bw/2));
+    const by=Math.max(2,d.y-bh-15);
+
+    ctx.fillStyle=`rgba(8,3,1,${0.94*alpha})`;
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(bx,by,bw,bh,4);
+    else ctx.rect(bx,by,bw,bh);
+    ctx.fill();
+    ctx.strokeStyle=`rgba(255,140,0,${0.4*alpha})`;
+    ctx.lineWidth=1;ctx.stroke();
+
+    ctx.fillStyle=`rgba(255,200,80,${alpha})`;
+    ctx.fillText(d.icon,bx+5,by+16);
+    ctx.fillText(d.label,bx+22,by+16);
+
+    ctx.font=`${fs-1}px 'Share Tech Mono',monospace`;
+    ctx.fillStyle=`${d.color||'#ff8c00'}${Math.round(alpha*255).toString(16).padStart(2,'0')}`;
+    ctx.fillText(`${(d.confidence*100).toFixed(0)}%`,bx+bw-28,by+16);
+
+    ctx.strokeStyle=`rgba(255,180,0,${0.15*alpha})`;
+    ctx.lineWidth=1;
+    ctx.setLineDash([2,3]);
+    ctx.beginPath();ctx.moveTo(d.x,d.y-7);ctx.lineTo(d.x,by+bh);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // ── ROVER TRAIL ──
+  if(rover.trail.length>1){
+    ctx.beginPath();
+    ctx.moveTo(rover.trail[0].x,rover.trail[0].y);
+    for(let i=1;i<rover.trail.length;i++) ctx.lineTo(rover.trail[i].x,rover.trail[i].y);
+    ctx.strokeStyle='rgba(0,212,255,0.15)';
+    ctx.lineWidth=2;ctx.setLineDash([3,5]);ctx.stroke();ctx.setLineDash([]);
+  }
+
+  // ── ROVER ──
+  const rx=rover.x,ry=rover.y;
+  const hRad=(rover.heading-90)*Math.PI/180;
+  const pulse=(Math.sin(Date.now()/500)+1)/2;
+
+  // Outer glow
+  const glo=ctx.createRadialGradient(rx,ry,6,rx,ry,30);
+  glo.addColorStop(0,`rgba(0,212,255,${0.20+pulse*0.12})`);
+  glo.addColorStop(1,'rgba(0,212,255,0)');
+  ctx.fillStyle=glo;
+  ctx.beginPath();ctx.arc(rx,ry,30,0,Math.PI*2);ctx.fill();
+
+  // Body
+  ctx.shadowColor='#00d4ff';ctx.shadowBlur=20;
+  ctx.beginPath();ctx.arc(rx,ry,13,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,30,50,0.9)';ctx.fill();
+  ctx.strokeStyle=`rgba(0,${170+pulse*85|0},${220+pulse*35|0},0.97)`;
+  ctx.lineWidth=2.5;ctx.stroke();
+  ctx.shadowBlur=0;
+
+  // Direction arrow
+  const arrL=CELL*0.38;
+  const ax=rx+Math.cos(hRad)*arrL,ay=ry+Math.sin(hRad)*arrL;
+  ctx.shadowColor='#00d4ff';ctx.shadowBlur=8;
+  ctx.beginPath();ctx.moveTo(rx,ry);ctx.lineTo(ax,ay);
+  ctx.strokeStyle='rgba(0,220,255,0.97)';ctx.lineWidth=2.5;ctx.stroke();
+  // Arrowhead
+  const hLen=7,hAng=0.45;
+  ctx.beginPath();
+  ctx.moveTo(ax,ay);
+  ctx.lineTo(ax-hLen*Math.cos(hRad-hAng),ay-hLen*Math.sin(hRad-hAng));
+  ctx.lineTo(ax-hLen*Math.cos(hRad+hAng),ay-hLen*Math.sin(hRad+hAng));
+  ctx.closePath();ctx.fillStyle='rgba(0,220,255,0.95)';ctx.fill();
+  ctx.shadowBlur=0;
+
+  // Center dot
+  ctx.beginPath();ctx.arc(rx,ry,3,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();
+
+  // Rover label
+  ctx.font=`bold ${Math.max(8,CELL*0.14)}px 'Orbitron',sans-serif`;
+  ctx.fillStyle='rgba(0,212,255,0.9)';
+  ctx.shadowColor='#00d4ff';ctx.shadowBlur=8;
+  ctx.textAlign='left';
+  ctx.fillText('ROVER',rx+17,ry-14);
+  ctx.shadowBlur=0;ctx.textAlign='left';
+
+  // ── BORDER ──
+  const bord=ctx.createLinearGradient(0,0,W,H);
+  const t2=Date.now()*0.001;
+  bord.addColorStop(0, `rgba(255,${50+Math.sin(t2)*30|0},0,0.7)`);
+  bord.addColorStop(0.5,`rgba(255,${100+Math.sin(t2+2)*30|0},0,0.5)`);
+  bord.addColorStop(1, `rgba(255,${50+Math.sin(t2+4)*30|0},0,0.7)`);
+  ctx.strokeStyle=bord;ctx.lineWidth=3;ctx.strokeRect(1.5,1.5,W-3,H-3);
+
+  // Corner dimension labels
+  ctx.fillStyle='rgba(255,200,100,0.40)';
+  ctx.font=`bold ${Math.max(9,CELL*0.16)}px 'Orbitron',sans-serif`;
+  ctx.textAlign='center';
+  ctx.fillText('← 1,5 m →',W/2,H-9);
+  ctx.save();ctx.translate(W-9,H/2);ctx.rotate(-Math.PI/2);
+  ctx.fillText('← 1,0 m →',0,0);ctx.restore();
+  ctx.textAlign='left';
+}
+
+// ══════════════════════════════════════════════════════
+// SIMULATION
+// ══════════════════════════════════════════════════════
+function simulationStep(){
+  simTime+=0.016;
+  const nx=W/2+Math.sin(simTime*0.35)*(W*0.40);
+  const ny=H/2+Math.sin(simTime*0.22+1.1)*(H*0.38);
+  const dx=nx-rover.x,dy=ny-rover.y;
+  if(Math.abs(dx)+Math.abs(dy)>0.5) rover.heading=Math.atan2(dy,dx)*180/Math.PI+90;
+  rover.trail.push({x:rover.x,y:rover.y});
+  if(rover.trail.length>55) rover.trail.shift();
+  rover.x=nx; rover.y=ny;
+
+  document.getElementById('rX').textContent=Math.min(150,Math.max(0,Math.round(rover.x/W*150)));
+  document.getElementById('rY').textContent=Math.min(100,Math.max(0,Math.round((1-rover.y/H)*100)));
+  document.getElementById('rH').textContent=(Math.round(((rover.heading%360)+360)%360));
+
+  const tick=Math.floor(simTime/4.5);
+  if(tick>lastDetTick){ lastDetTick=tick; spawnDetection(); }
+}
+
+function spawnDetection(){
+  const sp=SPECIES[Math.floor(Math.random()*SPECIES.length)];
+  const x=Math.max(CELL,Math.min(W-CELL,rover.x+(Math.random()-.5)*CELL*1.6));
+  const y=Math.max(CELL,Math.min(H-CELL,rover.y+(Math.random()-.5)*CELL*1.6));
+  addDetection({x,y,label:sp.name,icon:sp.icon,
+    confidence:0.67+Math.random()*0.31,color:sp.color,risk:sp.risk});
+  // Update nearby risk cells
+  const col=Math.floor(x/CELL),row=Math.floor(y/CELL);
+  for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++){
+    const rr=row+dr,cc=col+dc;
+    if(rr>=0&&rr<ROWS&&cc>=0&&cc<COLS)
+      riskGrid[rr][cc]=Math.max(0.03,Math.min(0.96,riskGrid[rr][cc]*0.55+sp.risk*0.45));
+  }
+}
+
+function addDetection(d){
+  d.time=Date.now();
+  detections.push(d);
+  if(detections.length>25) detections.shift();
+  addToLog(d); updateRiskUI();
+}
+
+function addToLog(d){
+  const log=document.getElementById('detLog');
+  const ph=log.querySelector('.empty-log');
+  if(ph) ph.remove();
+  const conf=(d.confidence*100).toFixed(1);
+  const t=new Date().toLocaleTimeString('fr-FR');
+  const el=document.createElement('div');
+  el.className='det-entry';
+  el.style.borderLeftColor=d.color||'#ff4500';
+  el.innerHTML=`<span class="det-icon">${d.icon}</span>
+    <div class="det-body">
+      <div class="det-name">${d.label}</div>
+      <div class="det-meta">Risque: ${(d.risk*100).toFixed(0)}% · ${t}</div>
+    </div>
+    <span class="det-conf" style="color:${d.color||'#ff8c00'}">${conf}%</span>`;
+  log.insertBefore(el,log.firstChild);
+  while(log.children.length>9) log.removeChild(log.lastChild);
+}
+
+function updateRiskUI(){
+  let c0=0,c1=0,c2=0,c3=0,sum=0,max=0,tot=ROWS*COLS;
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const v=riskGrid[r][c]; sum+=v; if(v>max)max=v;
+    if(v<0.20)c0++; else if(v<0.50)c1++; else if(v<0.75)c2++; else c3++;
+  }
+  const ps=[c0,c1,c2,c3].map(n=>Math.round(n/tot*100));
+  for(let i=0;i<4;i++){
+    document.getElementById(`rb${i}`).style.width=ps[i]+'%';
+    document.getElementById(`rp${i}`).textContent=ps[i]+'%';
+  }
+  const avg=sum/tot;
+  document.getElementById('riskAvg').textContent=avg.toFixed(2);
+  document.getElementById('riskMax').textContent=max.toFixed(2);
+
+  // Threat level
+  const tf=document.getElementById('threatFill');
+  const tl=document.getElementById('threatLabel');
+  const pct=Math.round(avg*100);
+  tf.style.width=pct+'%';
+  if(avg<0.25)     {tl.textContent='FAIBLE';    tl.style.color='#444'; tf.style.background='linear-gradient(90deg,#220800,#440a00)';}
+  else if(avg<0.45){tl.textContent='MODÉRÉ';    tl.style.color='#882200'; tf.style.background='linear-gradient(90deg,#440a00,#882200)';}
+  else if(avg<0.65){tl.textContent='ÉLEVÉ';     tl.style.color='#ff4500'; tf.style.background='linear-gradient(90deg,#882200,#ff4500,#ff8c00)';}
+  else if(avg<0.80){tl.textContent='CRITIQUE';  tl.style.color='#ff8c00'; tf.style.background='linear-gradient(90deg,#882200,#ff4500,#ff8c00,#ffd700)';}
+  else             {tl.textContent='EXTRÊME';   tl.style.color='#ffffff'; tf.style.background='linear-gradient(90deg,#cc2200,#ff4500,#ff8c00,#ffd700,#ffffff)';}
+}
+
+// ══════════════════════════════════════════════════════
+// WEBSOCKET
+// ══════════════════════════════════════════════════════
+function toggleConnect(){
+  if(wsConnected){ws&&ws.close();ws=null;wsConnected=false;setWsState('sim');}
+  else connectWS();
+}
+function connectWS(){
+  try{
+    ws=new WebSocket(WS_URL);
+    ws.onopen=()=>{wsConnected=true;setWsState('live');};
+    ws.onmessage=e=>{try{handleMsg(JSON.parse(e.data));}catch(_){}};
+    ws.onerror=ws.onclose=()=>{wsConnected=false;ws=null;setWsState('err');setTimeout(()=>setWsState('sim'),2000);};
+  }catch(_){setWsState('err');setTimeout(()=>setWsState('sim'),2000);}
+}
+function handleMsg(m){
+  if(m.rover||m.type==='telemetry'){
+    const rv=m.rover||m;
+    rover.x=(rv.x||0)*W/1.5; rover.y=H-(rv.y||0)*H;
+    rover.heading=rv.heading||0;
+    rover.trail.push({x:rover.x,y:rover.y});
+    if(rover.trail.length>55)rover.trail.shift();
+    document.getElementById('rX').textContent=Math.round((rv.x||0)*100);
+    document.getElementById('rY').textContent=Math.round((rv.y||0)*100);
+    document.getElementById('rH').textContent=Math.round(rover.heading);
+  }
+  const dets=m.detections||(m.type==='detection'?[m]:[]);
+  for(const d of dets){
+    const sp=SPECIES.find(s=>s.name.toLowerCase().includes((d.label||'').toLowerCase()))||SPECIES[0];
+    addDetection({x:(d.x||.5)*W,y:H-(d.y||.5)*H,
+      label:d.label||'Espèce',icon:sp.icon,
+      confidence:d.confidence||d.conf||.8,color:sp.color,risk:d.risk||sp.risk});
+  }
+  if(m.risk_grid){
+    for(let r=0;r<Math.min(ROWS,m.risk_grid.length);r++)
+      for(let c=0;c<Math.min(COLS,(m.risk_grid[r]||[]).length);c++)
+        riskGrid[r][c]=m.risk_grid[r][c];
+    updateRiskUI();
+  }
+}
+function setWsState(s){
+  const dot=document.getElementById('wsDot');
+  const lbl=document.getElementById('wsLabel');
+  const bdg=document.getElementById('modeBadge');
+  const btn=document.getElementById('connectBtn');
+  if(s==='live'){
+    dot.className='ws-dot live';lbl.textContent='CONNECTÉ';
+    bdg.textContent='LIVE';bdg.className='badge live';btn.textContent='⏹ Couper';
+  }else if(s==='err'){
+    dot.className='ws-dot err';lbl.textContent='ERREUR';
+    bdg.textContent='SIMULATION';bdg.className='badge sim';btn.textContent='⚡ WS Live';
+  }else{
+    dot.className='ws-dot sim';lbl.textContent='SIMULATION';
+    bdg.textContent='SIMULATION';bdg.className='badge sim';btn.textContent='⚡ WS Live';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// TOOLTIP
+// ══════════════════════════════════════════════════════
+canvas.addEventListener('mousemove',e=>{
+  const rect=canvas.getBoundingClientRect();
+  const mx=(e.clientX-rect.left)*(W/rect.width);
+  const my=(e.clientY-rect.top)*(H/rect.height);
+  const col=Math.floor(mx/CELL),row=Math.floor(my/CELL);
+  const tip=document.getElementById('tip');
+  if(col>=0&&col<COLS&&row>=0&&row<ROWS){
+    const v=riskGrid[row][col];
+    const xcm=col*10,ycm=(ROWS-1-row)*10;
+    tip.style.display='block';
+    tip.style.left=(mx+12)+'px';
+    tip.style.top=Math.max(0,my-60)+'px';
+    tip.innerHTML=`<b style="color:#ff8c00;font-family:'Orbitron',sans-serif;font-size:10px;">
+      (${xcm} cm, ${ycm} cm)</b><br>
+      Risque thermique : <span style="color:${thermalColor(v,1).replace(/,[^,]+\)$/,')')}">
+      ${(v*100).toFixed(1)} %</span>`;
+  }else{tip.style.display='none';}
+});
+canvas.addEventListener('mouseleave',()=>document.getElementById('tip').style.display='none');
+
+// ══════════════════════════════════════════════════════
+// RESET + CLOCK
+// ══════════════════════════════════════════════════════
+function resetSim(){
+  simTime=0;lastDetTick=0;detections=[];rover.trail=[];
+  rover.x=W/2;rover.y=H/2;rover.heading=0;
+  initRiskGrid();updateRiskUI();scanY=0;
+  document.getElementById('detLog').innerHTML='<div class="empty-log">Attente des données rover…</div>';
+  ['rX','rY','rH'].forEach(id=>document.getElementById(id).textContent='—');
+}
+
+setInterval(()=>document.getElementById('clock').textContent=new Date().toLocaleTimeString('fr-FR'),1000);
+document.getElementById('clock').textContent=new Date().toLocaleTimeString('fr-FR');
+
+// ══════════════════════════════════════════════════════
+// MAIN LOOP
+// ══════════════════════════════════════════════════════
+function loop(){
+  stepEmbers();
+  if(!wsConnected) simulationStep();
+  draw();
+  frameId=requestAnimationFrame(loop);
+}
+
+window.addEventListener('resize',()=>{
+  cancelAnimationFrame(frameId);
+  resizeEmberCanvas(); initEmbers();
+  initSize(); initRiskGrid(); updateRiskUI();
+  rover.x=W/2;rover.y=H/2;
+  loop();
+});
+
+resizeEmberCanvas();
+initEmbers();
+initSize();
+initRiskGrid();
+rover.x=W/2; rover.y=H/2;
+updateRiskUI();
+loop();
+</script>
+</body>
+</html>
