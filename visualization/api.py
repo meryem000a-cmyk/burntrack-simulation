@@ -2,8 +2,10 @@ import asyncio
 import json
 import os
 import sys
+import hashlib
 import jwt
 from datetime import datetime, timedelta
+from fastapi import Header
 
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
@@ -30,9 +32,46 @@ app.add_middleware(
 
 SECRET_KEY = "burntrack_super_secret_key"
 ALGORITHM = "HS256"
+ADMINS_FILE = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "data", "admins.json"))
 
 # Global simulation server instance
 sim_server = SimulationServer()
+
+def hash_password(password: str, salt: str = "burntrack_salt") -> str:
+    return hashlib.sha256((password + salt).encode()).hexdigest()
+
+def load_admins() -> dict:
+    if not os.path.exists(ADMINS_FILE):
+        os.makedirs(os.path.dirname(ADMINS_FILE), exist_ok=True)
+        default_admins = {"admin": hash_password("admin")}
+        with open(ADMINS_FILE, "w", encoding="utf-8") as f:
+            json.dump(default_admins, f, indent=4)
+        return default_admins
+    try:
+        with open(ADMINS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"admin": hash_password("admin")}
+
+def save_admins(admins: dict):
+    os.makedirs(os.path.dirname(ADMINS_FILE), exist_ok=True)
+    with open(ADMINS_FILE, "w", encoding="utf-8") as f:
+        json.dump(admins, f, indent=4)
+
+def get_current_admin(authorization: str = Header(None)) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Jeton d'autorisation manquant")
+    try:
+        parts = authorization.split(" ")
+        token = parts[1] if len(parts) > 1 else parts[0]
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        admins = load_admins()
+        if username in admins:
+            return username
+    except Exception:
+        pass
+    raise HTTPException(status_code=401, detail="Jeton d'accès invalide ou expiré")
 
 class LoginRequest(BaseModel):
     username: str
@@ -41,15 +80,43 @@ class LoginRequest(BaseModel):
 @app.post("/api/login")
 def login(req: LoginRequest):
     """Vérifie les identifiants et génère un jeton JWT."""
-    if req.username == "admin" and req.password == "admin":
+    admins = load_admins()
+    hashed = hash_password(req.password)
+    if req.username in admins and admins[req.username] == hashed:
         expire = datetime.utcnow() + timedelta(hours=24)
         token = jwt.encode(
-            {"sub": "admin", "exp": expire},
+            {"sub": req.username, "exp": expire},
             SECRET_KEY, 
             algorithm=ALGORITHM
         )
         return {"token": token}
     raise HTTPException(status_code=401, detail="Identifiants incorrects")
+
+# --- ENDPOINTS POUR LA GESTION DES ADMINS ---
+@app.get("/api/admins")
+def get_admins(current_user: str = Depends(get_current_admin)):
+    """Retourne la liste des administrateurs."""
+    return list(load_admins().keys())
+
+@app.post("/api/admins")
+def add_admin(req: LoginRequest, current_user: str = Depends(get_current_admin)):
+    """Ajoute ou modifie un administrateur."""
+    admins = load_admins()
+    admins[req.username] = hash_password(req.password)
+    save_admins(admins)
+    return {"status": "ok"}
+
+@app.delete("/api/admins/{username}")
+def delete_admin(username: str, current_user: str = Depends(get_current_admin)):
+    """Supprime un administrateur."""
+    if username == "admin":
+        raise HTTPException(status_code=400, detail="Impossible de supprimer l'administrateur principal 'admin'")
+    admins = load_admins()
+    if username not in admins:
+        raise HTTPException(status_code=404, detail="Administrateur non trouvé")
+    del admins[username]
+    save_admins(admins)
+    return {"status": "ok"}
 
 class WSWrap:
     """Wrapper pour rendre le WebSocket de FastAPI compatible avec l'ancien code."""
@@ -94,7 +161,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 token = msg.get("token", "")
                 try:
                     payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-                    if payload.get("sub") == "admin":
+                    sub = payload.get("sub")
+                    if sub in load_admins():
                         is_admin = True
                         await ws_wrapper.send(json.dumps({"type": "auth_success"}))
                 except jwt.ExpiredSignatureError:
@@ -104,7 +172,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             # 2. Sécurisation des commandes administratives
-            admin_commands = ["run_scenarios", "run_ensemble_scenario", "configure", "load_bouskoura"]
+            admin_commands = ["run_scenarios", "run_ensemble_scenario", "configure", "load_bouskoura", "play", "pause", "step", "reset", "ignite"]
             if cmd in admin_commands and not is_admin:
                 await ws_wrapper.send(json.dumps({
                     "type": "error", 
